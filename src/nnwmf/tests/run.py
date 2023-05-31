@@ -1,5 +1,5 @@
 
-from pyproject.utils.unittest_tester import UnittestTester
+from nnwmf.utils.unittest_tester import UnittestTester
 
 def run_unittests(test_classes = None):
     if test_classes is None:

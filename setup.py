@@ -60,7 +60,6 @@ def setup_package(config_file):
     req_py = cfg_require_version(['python'], cfg)[0]
     req_py = req_py[6:]
 
-    # ['pyproject = pyproject.main:main']
     console_entry_point = ['{:s} = {:s}.main:main'.format(pkgname, pkgname)]
 
     with open("README.md", "r", encoding="utf-8") as fh:

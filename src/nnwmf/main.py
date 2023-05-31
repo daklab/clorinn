@@ -1,4 +1,3 @@
-
 """
 Main command line options
 """
@@ -15,7 +14,7 @@ from .tests.run import run_unittests
 mlogger = CustomLogger(__name__)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='PyProject: A template Python repository')
+    parser = argparse.ArgumentParser(description='Nuclear Norm Weighted Matrix Factorization')
     parser.add_argument('--test',
                         dest = 'test',
                         action = 'store_true',
@@ -60,7 +59,7 @@ def do_task():
 
 def show_version():
     print ("")
-    print ("PyProject version {:s}".format(project.version()))
+    print ("NNWMF version {:s}".format(project.version()))
     print ("")
     return
 
