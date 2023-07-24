@@ -11,7 +11,7 @@ class NNMFW_CV():
 
     def __init__(self, kfolds = 2, test_size = None,
             chain_init = True, reverse_path = True,
-            return_fits = True,
+            return_fits = True, debug = False,
             **kwargs):
         
         self._kfolds = kfolds
@@ -22,7 +22,11 @@ class NNMFW_CV():
         
         # Handle NNMFW options
         kwargs.setdefault('suppress_warnings', True)
+        kwargs.setdefault('debug', debug)
         self._kwargs = kwargs
+
+        self._is_debug = debug
+        self.logger    = CustomLogger(__name__, is_debug = self._is_debug)
         return
 
 
@@ -62,6 +66,8 @@ class NNMFW_CV():
         if self._do_reverse_path:
             ranks = ranks[::-1]
 
+        self.logger.debug(f"Cross-validation over {ranks.shape[0]} ranks.")
+
         # Book keeping
         self._train_error = {r: list() for r in ranks}
         self._test_error  = {r: list() for r in ranks}
@@ -70,6 +76,7 @@ class NNMFW_CV():
         # Loop over folds and ranks for CV
         self._fold_labels = self.generate_fold_labels(Y)
         for k in range(self._kfolds):
+            self.logger.debug(f"Fold {k + 1} ...")
             mask = self._fold_labels == k + 1
             Ymiss = self.generate_masked_input(Y, mask)
             Xinit = None if X0 is None else X0.copy()
