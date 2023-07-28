@@ -4,125 +4,131 @@ Nuclear Norm Rank Minimization using Frank-Wolfe algorithm
 # Author: Saikat Banerjee
 
 import numpy as np
+import time
 from .top_comp_svd import TopCompSVD
 from ..utils.logs import CustomLogger
+from ..utils import model_errors as merr
 
-class NNMFW():
+class FrankWolfe():
 
     def __init__(self, max_iter = 1000,
             svd_method = 'power', svd_max_iter = None,
             stop_criteria = ['duality_gap', 'step_size', 'relative_objective'],
+            benchmark_method = 'rmse',
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
             show_progress = False, print_skip = None,
-            debug = True, suppress_warnings = False):
-        self._max_iter = max_iter
-        self._svd_method = svd_method
-        self._svd_max_iter = svd_max_iter
-        self._stop_criteria = stop_criteria
-        self._tol = tol
-        self._step_size_tol = step_tol
-        self._fxrel_tol = rel_tol
-        self._show_progress = show_progress
-        self._prog_step_skip = print_skip
-        if self._show_progress and self._prog_step_skip is None:
-            self._prog_step_skip = max(1, int(self._max_iter / 100)) * 10
+            debug = True, suppress_warnings = False, benchmark = False):
+        self.max_iter_ = max_iter
+        self.svd_method_ = svd_method
+        self.svd_max_iter_ = svd_max_iter
+        self.stop_criteria_ = stop_criteria
+        self.tol_ = tol
+        self.step_size_tol_ = step_tol
+        self.fxrel_tol_ = rel_tol
+        self.show_progress_ = show_progress
+        self.prog_step_skip_ = print_skip
+        if self.show_progress_ and self.prog_step_skip_ is None:
+            self.prog_step_skip_ = max(1, int(self.max_iter_ / 100)) * 10
         # set logger for this class
-        self._is_debug = debug
-        self.logger    = CustomLogger(__name__, is_debug = self._is_debug)
-        self._suppress_warnings = suppress_warnings
+        self.is_debug_ = debug
+        self.logger_   = CustomLogger(__name__, is_debug = self.is_debug_)
+        self.suppress_warnings_ = suppress_warnings
+        # flag the benchmarking, requires Ytrue for calculating errors
+        self.is_benchmark_ = benchmark
+        self.benchmark_method_ = benchmark_method
         return
 
 
     @property
     def X(self):
-        return self._X
+        return self.X_
 
 
     @property
     def duality_gaps(self):
-        return self._dg_list
+        return self.dg_list_
 
 
     @property
     def fx(self):
-        return self._fx_list
+        return self.fx_list_
 
 
     @property
     def steps(self):
-        return self._st_list
+        return self.st_list_
 
 
-    def f_objective(self, X):
+    def _f_objective(self, X):
         '''
         Objective function
         Y is observed, X is estimated
         W is the weight of each observation.
         '''
-        Xmask = self.get_masked(X)
+        Xmask = self._get_masked(X)
         # The * operator can be used as a shorthand for np.multiply on ndarrays.
-        if self._weight_mask is None:
-            fx = 0.5 * np.linalg.norm(self._Y - Xmask, 'fro')**2
+        if self.weight_mask_ is None:
+            fx = 0.5 * np.linalg.norm(self.Y_ - Xmask, 'fro')**2
         else:
-            fx = 0.5 * np.linalg.norm(self._weight_mask * (self._Y - Xmask), 'fro')**2
+            fx = 0.5 * np.linalg.norm(self.weight_mask_ * (self.Y_ - Xmask), 'fro')**2
         return fx
 
 
-    def f_gradient(self, X):
+    def _f_gradient(self, X):
         '''
         Gradient of the objective function.
         '''
-        Xmask = self.get_masked(X)
-        if self._weight_mask is None:
-            gx = Xmask - self._Y
+        Xmask = self._get_masked(X)
+        if self.weight_mask_ is None:
+            gx = Xmask - self.Y_
         else:
-            gx = np.square(self._weight_mask) * (Xmask - self._Y)
+            gx = np.square(self.weight_mask_) * (Xmask - self.Y_)
         return gx
 
 
-    def fw_step_size(self, dg, D):
-        if self._weight_mask is None:
+    def _fw_step_size(self, dg, D):
+        if self.weight_mask_ is None:
             denom = np.linalg.norm(D, 'fro')**2
         else:
-            denom = np.linalg.norm(self._weight_mask * D, 'fro')**2
+            denom = np.linalg.norm(self.weight_mask_ * D, 'fro')**2
         ss = dg / denom
         ss = min(ss, 1.0)
         if ss < 0:
-            if not self._suppress_warnings:
-                self.logger.warn("Step Size is less than 0. Using last valid step size.")
-            ss = self._st_list[-1]
+            if not self.suppress_warnings_:
+                self.logger_.warn("Step Size is less than 0. Using last valid step size.")
+            ss = self.st_list_[-1]
         return ss
 
 
-    def get_masked(self, X):
-        if self._mask is None or X is None:
+    def _get_masked(self, X):
+        if self.mask_ is None or X is None:
             return X
         else:
-            return X * ~self._mask
+            return X * ~self.mask_
 
 
-    def linopt_oracle(self, X):
+    def _linopt_oracle(self, X):
         '''
         Linear optimization oracle,
         where the feasible region is a nuclear norm ball for some r
         '''
-        U1, V1_T = self.get_singular_vectors(X)
-        S = - self._rank * U1 @ V1_T
+        U1, V1_T = self._get_singular_vectors(X)
+        S = - self.rank_ * U1 @ V1_T
         return S
 
 
-    def get_singular_vectors(self, X):
-        max_iter = self._svd_max_iter
+    def _get_singular_vectors(self, X):
+        max_iter = self.svd_max_iter_
         if max_iter is None:
-            nstep = len(self._st_list) + 1
+            nstep = len(self.st_list_) + 1
             max_iter = 10 + int(nstep / 20)
             max_iter = min(max_iter, 25)
-        svd = TopCompSVD(method = self._svd_method, max_iter = max_iter)
+        svd = TopCompSVD(method = self.svd_method_, max_iter = max_iter)
         svd.fit(X)
         return svd.u1, svd.v1_t
 
 
-    def fit(self, Y, r, weight = None, mask = None, X0 = None):
+    def fit(self, Y, r, weight = None, mask = None, X0 = None, Ytrue = None):
 
         '''
         Wrapper function for the minimization
@@ -132,80 +138,97 @@ class NNMFW():
         n, p = Y.shape
 
         # Make some variables available for the class
-        self._weight = weight
-        self._mask = mask
-        self._weight_mask = self.get_masked(self._weight)
-        self._Y = Y
-        self._rank = r
+        self.weight_ = weight
+        self.mask_ = mask
+        self.weight_mask_ = self._get_masked(self.weight_)
+        self.Y_ = Y
+        self.rank_ = r
 
         # Step 0
         X = np.zeros_like(Y) if X0 is None else X0.copy()
         dg = np.inf
         step = 1.0
-        fx = self.f_objective(X)
+        fx = self._f_objective(X)
 
         # Save relevant variables in list
-        self._dg_list = [dg]
-        self._fx_list = [fx]
-        self._st_list = [step]
+        self.dg_list_ = [dg]
+        self.fx_list_ = [fx]
+        self.st_list_ = [step]
+        self.cpu_time_ = [0]
 
+        # Benchmarking
+        if self.is_benchmark_:
+            assert Ytrue is not None
+            assert Ytrue.shape == Y.shape
+            self.rmse_ = [merr.get(Ytrue, X, method = self.benchmark_method_)]
+
+        cpu_time_old = time.process_time()
         # Steps 1, ..., max_iter
-        for i in range(self._max_iter):
+        for i in range(self.max_iter_):
 
-            X, G, dg, step = self.fw_one_step(X)
-            fx = self.f_objective(X)
+            X, G, dg, step = self._fw_one_step(X)
+            fx = self._f_objective(X)
 
-            self._fx_list.append(fx)
-            self._dg_list.append(dg)
-            self._st_list.append(step)
+            # Time 
+            cpu_time = time.process_time()
+            self.cpu_time_.append(cpu_time - cpu_time_old)
+            cpu_time_old = cpu_time
 
-            if self._show_progress:
-                if (i % self._prog_step_skip == 0):
-                    self.logger.info(f"Iteration {i}. Step size {step:.3f}. Duality Gap {dg:g}")
 
-            if self.do_stop():
+            self.fx_list_.append(fx)
+            self.dg_list_.append(dg)
+            self.st_list_.append(step)
+
+            if self.is_benchmark_:
+                self.rmse_.append(merr.get(Ytrue, X, method = self.benchmark_method_))
+
+            if self.show_progress_:
+                if (i % self.prog_step_skip_ == 0):
+                    self.logger_.info(f"Iteration {i}. Step size {step:.3f}. Duality Gap {dg:g}")
+
+            if self._do_stop():
                 break
 
-        self._X = X
+        self.X_ = X
 
         return
 
-    def fw_one_step(self, X):
+    def _fw_one_step(self, X):
         # 1. Gradient for X_(t-1)
-        G = self.f_gradient(X)
+        G = self._f_gradient(X)
         # 2. Linear optimization subproblem
-        S = self.linopt_oracle(G)
+        S = self._linopt_oracle(G)
         # 3. Define D
         D = X - S
         # 4. Duality gap
         dg = np.trace(D.T @ G)
         # 5. Step size
-        step = self.fw_step_size(dg, D)
+        step = self._fw_step_size(dg, D)
         # 6. Update
         Xnew = X - step * D
         return Xnew, G, dg, step
 
-    def do_stop(self):
+    def _do_stop(self):
         # self._stop_criteria = ['duality_gap', 'step_size', 'relative_objective']
         #
-        if 'duality_gap' in self._stop_criteria:
-            dg = self._dg_list[-1]
-            if np.abs(dg) <= self._tol:
-                self._convergence_msg = "Duality gap converged below tolerance."
+        if 'duality_gap' in self.stop_criteria_:
+            dg = self.dg_list_[-1]
+            if np.abs(dg) <= self.tol_:
+                self.convergence_msg_ = "Duality gap converged below tolerance."
                 return True
         #
-        if 'step_size' in self._stop_criteria:
-            ss = self._st_list[-1]
-            if ss <= self._step_size_tol:
-                self._convergence_msg = "Step size converged below tolerance."
+        if 'step_size' in self.stop_criteria_:
+            ss = self.st_list_[-1]
+            if ss <= self.step_size_tol_:
+                self.convergence_msg_ = "Step size converged below tolerance."
                 return True
         #
-        if 'relative_objective' in self._stop_criteria:
-            fx = self._fx_list[-1]
-            fx0 = self._fx_list[-2]
+        if 'relative_objective' in self.stop_criteria_:
+            fx = self.fx_list_[-1]
+            fx0 = self.fx_list_[-2]
             fx_rel = np.abs((fx - fx0) / fx0)
-            if fx_rel <= self._fxrel_tol:
-                self._convergence_msg = "Relative difference in objective function converged below tolerance."
+            if fx_rel <= self.fxrel_tol_:
+                self.convergence_msg_ = "Relative difference in objective function converged below tolerance."
                 return True
         #
         return False

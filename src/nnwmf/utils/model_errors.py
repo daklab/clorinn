@@ -1,0 +1,36 @@
+import numpy as np
+
+def get(original, recovered, mask = None, method = 'rmse'):
+    if mask is None:
+        mask = np.ones_like(original)
+
+    if method == 'mse':
+        return get_mse(original, recovered, mask)
+
+    elif method == 'rmse':
+        return get_rmse(original, recovered, mask)
+
+    elif method == 'psnr':
+        return get_psnr(original, recovered, mask)
+
+    return
+
+
+def get_mse(original, recovered, mask):
+    n = np.sum(mask)
+    mse = np.sum(np.square((original - recovered) * mask)) / n
+    return mse
+
+
+def get_rmse(original, recovered, mask):
+    mse = get_mse(original, recovered, mask)
+    return np.sqrt(mse)
+
+
+def get_psnr(original, recovered, mask):
+    omax = np.max(original[mask == 1])
+    omin = np.min(original[mask == 1])
+    maxsig2 = np.square(omax - omin)
+    mse = get_mse(original, recovered, mask)
+    res = 10 * np.log10(maxsig2 / mse)
+    return res
