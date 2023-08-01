@@ -6,6 +6,7 @@ Nuclear Norm Rank Minimization using Frank-Wolfe algorithm
 import numpy as np
 import time
 from .top_comp_svd import TopCompSVD
+from .simplex_projection import EuclideanProjection
 from ..utils.logs import CustomLogger
 from ..utils import model_errors as merr
 
@@ -14,13 +15,16 @@ class FrankWolfe():
     def __init__(self, max_iter = 1000,
             svd_method = 'power', svd_max_iter = None,
             stop_criteria = ['duality_gap', 'step_size', 'relative_objective'],
+            model = 'nnm', simplex_method = 'condat',
             benchmark_method = 'rmse',
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
             show_progress = False, print_skip = None,
             debug = True, suppress_warnings = False, benchmark = False):
         self.max_iter_ = max_iter
+        self.model_ = model
         self.svd_method_ = svd_method
         self.svd_max_iter_ = svd_max_iter
+        self.simplex_method_ = simplex_method
         self.stop_criteria_ = stop_criteria
         self.tol_ = tol
         self.step_size_tol_ = step_tol
@@ -107,7 +111,18 @@ class FrankWolfe():
             return X * ~self.mask_
 
 
-    def _linopt_oracle(self, X):
+    def _linopt_oracle_l1norm(self, X):
+        '''
+        Linear optimization oracle,
+        where the feasible region is a l1 norm ball for some r
+        '''
+        maxidx = np.unravel_index(np.argmax(X), X.shape)
+        S = np.zeros_like(X)
+        S[maxidx] = - self.l1_thres_
+        return S
+
+
+    def _linopt_oracle_nucnorm(self, X):
         '''
         Linear optimization oracle,
         where the feasible region is a nuclear norm ball for some r
@@ -128,6 +143,14 @@ class FrankWolfe():
         return svd.u1, svd.v1_t
 
 
+    def _proj_l1ball(self, X):
+        n, p = X.shape
+        xflat = X.flatten()
+        eucp = EuclideanProjection(method = self.simplex_method_, target = 'l1')
+        eucp.fit(xflat, a = self.l1_thres_)
+        return eucp.proj.reshape(n, p)
+
+
     def fit(self, Y, r, weight = None, mask = None, X0 = None, Ytrue = None):
 
         '''
@@ -142,32 +165,54 @@ class FrankWolfe():
         self.mask_ = mask
         self.weight_mask_ = self._get_masked(self.weight_)
         self.Y_ = Y
-        self.rank_ = r
+        if self.model_ == 'nnm':
+            self.rank_ = r
+        elif self.model_ == 'nnm-sparse':
+            self.rank_, self.l1_thres_ = r
 
         # Step 0
         X = np.zeros_like(Y) if X0 is None else X0.copy()
         dg = np.inf
         step = 1.0
         fx = self._f_objective(X)
+        # used only for 'nnm-sparse'
+        if self.model_ == 'nnm-sparse':
+            M = np.zeros_like(Y)
+            fm = self._f_objective(M)
+            self.fm_list_ = [fm]
+            self.fl_list_ = [fx]
 
         # Save relevant variables in list
-        self.dg_list_ = [dg]
         self.fx_list_ = [fx]
+        self.dg_list_ = [dg]
         self.st_list_ = [step]
         self.cpu_time_ = [0]
 
         # Benchmarking
         if self.is_benchmark_:
-            assert Ytrue is not None
+            if Ytrue is None:
+                self.logger_.warn("True input not provided. Using observed input matrix for RMSE calculation.")
+                Ytrue = self.Y_.copy()
             assert Ytrue.shape == Y.shape
-            self.rmse_ = [merr.get(Ytrue, X, method = self.benchmark_method_)]
+            if self.model_ == 'nnm':
+                self.rmse_ = [merr.get(Ytrue, X, method = self.benchmark_method_)]
+            elif self.model_ == 'nnm-sparse':
+                self.rmse_          = [merr.get(Ytrue, X + M, method = self.benchmark_method_)]
+                self.rmse_low_rank_ = [merr.get(Ytrue, X, method = self.benchmark_method_)]
+                self.rmse_sparse_   = [merr.get(Ytrue, M, method = self.benchmark_method_)]
 
         cpu_time_old = time.process_time()
         # Steps 1, ..., max_iter
         for i in range(self.max_iter_):
 
-            X, G, dg, step = self._fw_one_step(X)
-            fx = self._f_objective(X)
+            if self.model_ == 'nnm':
+                X, G, dg, step = self._fw_one_step_nnm(X)
+                fx = self._f_objective(X)
+            elif self.model_ == 'nnm-sparse':
+                X, M, G, dg, step = self._fw_one_step_nnm_sparse(X, M)
+                fx = self._f_objective(X + M)
+                fm = self._f_objective(M)
+                fl = self._f_objective(X)
 
             # Time 
             cpu_time = time.process_time()
@@ -179,8 +224,17 @@ class FrankWolfe():
             self.dg_list_.append(dg)
             self.st_list_.append(step)
 
+            if self.model_ == 'nnm-sparse':
+                self.fm_list_.append(fm)
+                self.fl_list_.append(fl)
+
             if self.is_benchmark_:
-                self.rmse_.append(merr.get(Ytrue, X, method = self.benchmark_method_))
+                if self.model_ == 'nnm':
+                    self.rmse_.append(merr.get(Ytrue, X, method = self.benchmark_method_))
+                elif self.model_ == 'nnm-sparse':
+                    self.rmse_.append(merr.get(Ytrue, X + M, method = self.benchmark_method_))
+                    self.rmse_low_rank_.append(merr.get(Ytrue, X, method = self.benchmark_method_))
+                    self.rmse_sparse_.append(merr.get(Ytrue, M, method = self.benchmark_method_))
 
             if self.show_progress_:
                 if (i % self.prog_step_skip_ == 0):
@@ -190,14 +244,15 @@ class FrankWolfe():
                 break
 
         self.X_ = X
+        if self.model_ == 'nnm-sparse': self.M_ = M
 
         return
 
-    def _fw_one_step(self, X):
+    def _fw_one_step_nnm(self, X):
         # 1. Gradient for X_(t-1)
         G = self._f_gradient(X)
         # 2. Linear optimization subproblem
-        S = self._linopt_oracle(G)
+        S = self._linopt_oracle_nucnorm(G)
         # 3. Define D
         D = X - S
         # 4. Duality gap
@@ -207,6 +262,29 @@ class FrankWolfe():
         # 6. Update
         Xnew = X - step * D
         return Xnew, G, dg, step
+
+
+    def _fw_one_step_nnm_sparse(self, L, M):
+        # 1. Gradient for X_(t-1)
+        G = self._f_gradient(L + M)
+        # 2. Linear optimization subproblem
+        SL = self._linopt_oracle_nucnorm(G)
+        SM = self._linopt_oracle_l1norm(G)
+        # 3. Define D
+        DL = L - SL
+        DM = M - SM
+        # 4. Duality gap
+        dg = np.trace(DL.T @ G) + np.trace(DM.T @ G)
+        # 5. Step size
+        step = self._fw_step_size(dg, DL + DM)
+        # 6. Update
+        Lnew = L - step * DL
+        Mnew = M - step * DM
+        # 7. l1 ball projection
+        G_half = self._f_gradient(Lnew + Mnew)
+        Mnew = self._proj_l1ball(Mnew - G_half)
+        return Lnew, Mnew, G, dg, step
+
 
     def _do_stop(self):
         # self._stop_criteria = ['duality_gap', 'step_size', 'relative_objective']
