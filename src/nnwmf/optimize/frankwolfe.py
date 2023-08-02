@@ -169,6 +169,7 @@ class FrankWolfe():
             self.rank_ = r
         elif self.model_ == 'nnm-sparse':
             self.rank_, self.l1_thres_ = r
+            self.l1_thres_ *= n * p
 
         # Step 0
         X = np.zeros_like(Y) if X0 is None else X0.copy()
@@ -186,7 +187,7 @@ class FrankWolfe():
         self.fx_list_ = [fx]
         self.dg_list_ = [dg]
         self.st_list_ = [step]
-        self.cpu_time_ = [0]
+        self.cpu_time_ = [1e-8] # do not use 0 to avoid log10 error.
 
         # Benchmarking
         if self.is_benchmark_:
@@ -276,7 +277,8 @@ class FrankWolfe():
         # 4. Duality gap
         dg = np.trace(DL.T @ G) + np.trace(DM.T @ G)
         # 5. Step size
-        step = self._fw_step_size(dg, DL + DM)
+        #step = self._fw_step_size(dg, DL + DM)
+        step = self._fw_step_size(dg, DL)
         # 6. Update
         Lnew = L - step * DL
         Mnew = M - step * DM
@@ -308,5 +310,13 @@ class FrankWolfe():
             if fx_rel <= self.fxrel_tol_:
                 self.convergence_msg_ = "Relative difference in objective function converged below tolerance."
                 return True
+        #
+            if len(self.st_list_) > 2:
+                dg = self.dg_list_[-1]
+                dg0 = self.dg_list_[-2]
+                dg_rel = np.abs((dg - dg0) / dg0)
+                if dg_rel <= self.fxrel_tol_:
+                    self.convergence_msg_ = "Relative difference in duality gap converged below tolerance."
+                    return True
         #
         return False

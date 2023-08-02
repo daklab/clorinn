@@ -173,7 +173,7 @@ class IALM:
         self.mu_list_ = [mu]
         self.primal_res_ = [r]
         self.dual_res_ = [h]
-        self.cpu_time_ = [0]
+        self.cpu_time_ = [1e-8] # do not use zero to avoid log10 error
         # Benchmarking
         if self.is_benchmark_:
             assert Xtrue is not None
