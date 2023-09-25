@@ -82,6 +82,7 @@ class FrankWolfe_CV():
             Ymiss = self._generate_masked_input(Y, mask)
             Xinit = None if X0 is None else X0.copy()
             for r in ranks:
+                self.logger_.debug(f"Rank {r:.4f}")
                 #
                 # Call the main algorithm
                 #

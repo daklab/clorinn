@@ -64,26 +64,30 @@ class IALM:
     """
     Parameters
     ----------
-        lmb:
-            penalty on sparse errors
-        mu_0:
-            initial lagrangian penalty
         rho:
-            learning rate
+            learning rate used for updating mu
         tau:
-            mu update criterion parameter
+            parameter used for ADMM update of mu
         max_iter:
             max number of iterations for the algorithm to run
-        tol_rel:
-            relative tolerance
+        primal_tol:
+            tolerance for the primal residual
+        dual_tol:
+            tolerance for the dual residual
 
     """
     def __init__(self, rho = 1.6, tau = 10,
-                 mu_update_method = 'default',
+                 mu_update_method = 'admm',
                  benchmark_method = 'rmse',
                  max_iter = 100, primal_tol = 1e-7, 
                  dual_tol = None, debug = False, benchmark = False,
                  show_progress = False, print_skip = None):
+        '''
+        Choice of default parameters:
+            rho: https://arxiv.org/abs/1009.5055
+            primal_tol: https://arxiv.org/abs/1009.5055
+            dual_tol: https://arxiv.org/abs/1009.5055
+        '''
 
         assert rho > 1
         assert tau > 1
@@ -114,7 +118,7 @@ class IALM:
         self.benchmark_method_ = benchmark_method
 
 
-    def fit(self, X, lmb = None, 
+    def fit(self, X, lmb = None, mask = None,
             mu_0 = None,
             Xtrue = None):
         """
@@ -144,6 +148,7 @@ class IALM:
 
         # set lambda
         if lmb is None:
+            # see Sec. 4 (p.21) of Candes et. al. (https://arxiv.org/abs/0912.3599)
             lmb = 1. / np.sqrt(np.max(X.shape))
 
         # set mu_0
@@ -154,6 +159,8 @@ class IALM:
             # Alternate definition
             # see p.29 of Candes et. al. (https://arxiv.org/abs/0912.3599)
             # mu = 0.25 * np.prod(X.shape) / X_l1norm
+
+        self.logger_.debug(f"Fit RPCA using IALM (mu update {self.mu_update_method_}, lamba = {lmb:.4f})")
 
         # set initial Y
         # The function J() required for initialization of dual variables as advised in Section 3.1 of
@@ -168,6 +175,10 @@ class IALM:
         #
         # set initial L
         L = singular_value_thresholding(X - E + Y/mu, 1/mu)
+        #
+        # set mask
+        self.mask_ = mask
+        E = self._get_masked(E)
 
         r, h = self._get_residuals(X, L, E, E, mu, X_fnorm)
         self.mu_list_ = [mu]
@@ -186,6 +197,7 @@ class IALM:
             # Solve argmin_S ||X - (L + E) + Y/mu||_F^2 + (lmb/mu)*||S||_1
             E_last = E.copy()
             E = soft_thresholding(X - L + Y/mu, lmb/mu)
+            E = self._get_masked(E)
 
             # Solve argmin_L ||X - (L + E) + Y/mu||_F^2 + (lmb/mu)*||L||_*
             L = singular_value_thresholding(X - E + Y/mu, 1/mu)
@@ -221,6 +233,16 @@ class IALM:
         self.E_ = E
         return
 
+
+    def _get_masked(self, X):
+        if self.mask_ is None or X is None:
+            return X
+        else:
+            # Numpy casts True to 1 and False to 0
+            # Here, we need to set True to 0 and False to 1
+            return X * ~self.mask_
+
+
     @staticmethod
     def _get_residuals(X, L, E, E_last, mu, X_frobnorm):
         primal_residual = frobenius_norm(X - L - E) / X_frobnorm
@@ -235,6 +257,18 @@ class IALM:
             'admm': update from Boyd et. al. (https://stanford.edu/~boyd/papers/pdf/admm_distr_stats.pdf)
                 ADMM modification of the IALM algorithm. No idea if it is good or bad.
             'ialm': update from Lin et. al. (https://arxiv.org/abs/1009.5055)
+        Parameters
+        ----------
+            mu: 
+                current value of mu
+            r:
+                primal residual
+            h: 
+                dual residual
+        Returns
+        -------
+            mu_new:
+                updated value of mu
         """
         if self.mu_update_method_ == 'admm':
             if r > self.tau_ * h:
@@ -244,7 +278,7 @@ class IALM:
             else:
                 return mu
 
-        elif self.mu_update_method_ == 'default':
+        elif self.mu_update_method_ == 'ialm':
             if h < self.dual_tol_:
                 return mu * self.rho_
             else:

@@ -15,7 +15,7 @@ class FrankWolfe():
     def __init__(self, max_iter = 1000,
             svd_method = 'power', svd_max_iter = None,
             stop_criteria = ['duality_gap', 'step_size', 'relative_objective'],
-            model = 'nnm', simplex_method = 'condat',
+            model = 'nnm', simplex_method = 'sort',
             benchmark_method = 'rmse',
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
             show_progress = False, print_skip = None,
