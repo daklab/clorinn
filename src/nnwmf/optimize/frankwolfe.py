@@ -168,8 +168,12 @@ class FrankWolfe():
         if self.model_ == 'nnm':
             self.rank_ = r
         elif self.model_ == 'nnm-sparse':
-            self.rank_, self.l1_thres_ = r
-            self.l1_thres_ *= n * p
+            if isinstance(r, tuple):
+                self.rank_, self.l1_thres_ = r
+            else:
+                self.rank_ = r
+                self.l1_thres_ = 1.0
+            self.l1_thres_ *= np.linalg.norm(Y, ord = 1) / np.sqrt(np.max(Y.shape))
 
         # Step 0
         X = np.zeros_like(Y) if X0 is None else X0.copy()
