@@ -1,6 +1,14 @@
 import os
 import logging
 
+def name():
+    return "NNWMF"
+
+
+def description():
+    return "Nuclear Norm Weighted Matrix Factorization"
+
+
 def version():
     ## Get the version from version.py without importing the package
     vfn = os.path.join(os.path.dirname(__file__), '../version.py')

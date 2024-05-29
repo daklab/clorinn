@@ -14,7 +14,7 @@ from .tests.run import run_unittests
 mlogger = CustomLogger(__name__)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Nuclear Norm Weighted Matrix Factorization')
+    parser = argparse.ArgumentParser(description=project.description())
     parser.add_argument('--test',
                         dest = 'test',
                         action = 'store_true',
@@ -59,7 +59,7 @@ def do_task():
 
 def show_version():
     print ("")
-    print ("NNWMF version {:s}".format(project.version()))
+    print ("{:s} version {:s}".format(project.name(), project.version()))
     print ("")
     return
 
