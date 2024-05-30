@@ -8,7 +8,7 @@ from ..utils import model_errors as merr
 class FrankWolfe_CV():
     """
     Cross-validation via iterative optimization using Frank-Wolfe algorithm
-    along a path of constraints on the nuclear norm of the input matrix.
+    along a path/sequence of constraints on the nuclear norm of the input matrix.
 
     Parameters
     ----------
@@ -118,17 +118,41 @@ class FrankWolfe_CV():
         return rank
 
 
-    def fit(self, Yin, rseq = None, weight = None, X0 = None):
+    def fit(self, Y, rseq = None, weight = None, X0 = None):
         """
-        Requires centered Y for cross validation.
-        Can handle nan in input.
+        Wrapper function for performing the cross-validation.
+
+        Parameters
+        ----------
+        Y : np.ndarray [size (n, p); dtype: float]
+            Input data matrix with n rows and p columns. May have missing values as np.nan.
+
+        rseq : np.ndarray [size (m,); dtype: float], default=None
+            Path/sequence of nuclear norm constraints for the cross-validation. If set
+            to None, a path is automatically estimated from the input data.
+
+        weight : np.ndarray [size (n, p); dtype: float], default=None
+            An array of weights for each element in the input matrix Y. If set to None,
+            all weights are assumed to be 1.
+
+        X0 : np.ndarray [size (n, p); dtype: float], default=None
+            Optional initial guess for the low rank matrix in the FW algorithm. If set
+            to None, the optimization is initiated from a matrix of zeros.
+
+        Notes
+        -----
+        The input matrix Y is centered before cross-validation.
+        
         """
-        Y = Yin - np.nanmean(Yin, axis = 0, keepdims = True)
-        Y = np.nan_to_num(Y, nan = 0.0)
+        nan_mask = np.isnan(Y) # may contain NaN
+        Y_cent = Y - np.nanmean(Y, axis = 0, keepdims = True)
+        # initialize the missing NaN entries to zero, 
+        # will be updated by the FW algorithm.
+        # Y_cent = np.nan_to_num(Y_cent, nan = 0.0)
 
         # Generate list of rseq for CV
         if rseq is None:
-            nucnormY = np.linalg.norm(Y, 'nuc')
+            nucnormY = np.linalg.norm(Y_cent, 'nuc')
             rseq = self._generate_rseq(nucnormY)
         if self.do_reverse_path_:
             rseq = rseq[::-1]
@@ -141,27 +165,31 @@ class FrankWolfe_CV():
         self.nnm_         = {r: list() for r in rseq}
 
         # Loop over folds and rseq for CV
-        self.fold_labels_ = self._generate_fold_labels(Y)
+        self.fold_labels_ = self._generate_fold_labels(Y_cent)
         for k in range(self.kfolds_):
             self.logger_.debug(f"Fold {k + 1} ...")
-            mask = self.fold_labels_ == k + 1
-            Ymiss = self._generate_masked_input(Y, mask)
+            # Mask the fold test indices: Set them to NaN.
+            # Plus there could be other NaN elements in Y_train
+            test_mask = self.fold_labels_ == k + 1
+            Y_test  = self._generate_masked_input(Y_cent, test_mask)
+            Y_train = self._generate_masked_input(Y_cent, ~test_mask)
             Xinit = None if X0 is None else X0.copy()
             for r in rseq:
                 self.logger_.debug(f"Rank {r:.4f}")
                 #
-                # Call the main algorithm
+                # Call the main algorithm on Y_train.
+                # Let FrankWolfe handle missingness.
                 #
                 nnm_cv = FrankWolfe(**self.kwargs_)
-                nnm_cv.fit(Ymiss, r, weight = weight, mask = mask, X0 = Xinit)
+                nnm_cv.fit(Y_train, r, weight = weight, mask = None, X0 = Xinit)
                 #
-                test_err_k  = merr.get(Y, nnm_cv.X, mask, method = 'rmse')
-                train_err_k = merr.get(Y, nnm_cv.X, ~mask, method = 'rmse')
+                test_err  = merr.get(Y_test, nnm_cv.X, method = 'rmse')
+                train_err = merr.get(Y_train, nnm_cv.X, method = 'rmse')
                 # More bookkeeping
                 if self.return_fits_:
                     self.nnm_[r].append(nnm_cv)
-                self.test_error_[r].append(test_err_k)
-                self.train_error_[r].append(train_err_k)
+                self.test_error_[r].append(test_err)
+                self.train_error_[r].append(train_err)
                 if self.do_chain_initialize_:
                     Xinit = nnm_cv.X
         return
@@ -197,8 +225,17 @@ class FrankWolfe_CV():
 
 
     def _generate_masked_input(self, Y, mask):
-        Ymiss_nan = Y.copy()
-        Ymiss_nan[mask] = np.nan
-        Ymiss_nan_cent = Ymiss_nan - np.nanmean(Ymiss_nan, axis = 0, keepdims = True)
-        Ymiss_nan_cent[mask] = 0.0
-        return Ymiss_nan_cent
+        """
+        Puts nan value to maked indices of the input matrix Y
+        without overwriting.
+        """
+        Y_miss = Y.copy()
+        Y_miss[mask] = np.nan
+        return Y_miss
+
+    #def _generate_masked_input(self, Y, mask):
+    #    Ymiss_nan = Y.copy()
+    #    Ymiss_nan[mask] = np.nan
+    #    Ymiss_nan_cent = Ymiss_nan - np.nanmean(Ymiss_nan, axis = 0, keepdims = True)
+    #    Ymiss_nan_cent[mask] = 0.0
+    #    return Ymiss_nan_cent

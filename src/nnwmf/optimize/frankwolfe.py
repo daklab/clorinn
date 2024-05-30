@@ -281,6 +281,10 @@ class FrankWolfe():
             is calculated between the estimated matrices (X, M and X+M) and Ytrue.
             If set to None, then `Ytrue` is assumed equal to `Y`.
 
+        Note
+        ----
+        Any NaN value in the input matrix is added to `mask`.
+
         Usage
         -----
             model = FrankWolfe(<params>)
@@ -288,12 +292,18 @@ class FrankWolfe():
         '''
 
         n, p = Y.shape
+        nan_mask = np.isnan(Y) # the input may contain NaN entries
 
-        # Make some variables available for the class
-        self.weight_ = weight
-        self.mask_ = mask
-        self.weight_mask_ = self._get_masked(self.weight_)
+        # Set class attributes
         self.Y_ = Y
+        # Combine the NaN mask and the input mask, if provided.
+        # Prefer to keep it None if there is no mask
+        input_mask = np.zeros((n, p), dtype=bool) if mask is None else mask
+        self.mask_ = np.logical_or(nan_mask, input_mask)
+        if not np.any(self.mask_): self.mask_ = None
+
+        self.weight_ = weight
+        self.weight_mask_ = self._get_masked(self.weight_)
         if self.model_ == 'nnm':
             self.rank_ = r
         elif self.model_ == 'nnm-sparse':
