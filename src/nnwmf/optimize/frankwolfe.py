@@ -108,7 +108,7 @@ class FrankWolfe():
             benchmark_method = 'rmse',
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
             show_progress = False, print_skip = None,
-            debug = True, suppress_warnings = False, benchmark = False):
+            debug = False, suppress_warnings = False, benchmark = False):
                 
         self.max_iter_ = max_iter
         self.model_ = model
@@ -391,6 +391,11 @@ class FrankWolfe():
 
             if self._do_stop():
                 break
+
+            # If max_iter is reached, then terminate.
+            if i == self.max_iter_ - 1:
+                self.convergence_msg_ = f"Maxinum number of iterations reached."
+
 
         self.logger_.info(f"Iteration {i}. Step size {step:.3f}. Duality Gap {dg:g}")
         self.logger_.info(self.convergence_msg_)

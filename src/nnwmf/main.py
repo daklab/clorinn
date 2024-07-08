@@ -76,9 +76,9 @@ def main():
     mlogger.set_loglevel(log_level)
     mlogger.override_global_default_loglevel(log_level)
 
-    if opts.test:
+    if opts.test or len(opts.testmodules) > 0:
         mlogger.debug("Calling logger from main")
-        run_unittests()
+        run_unittests(test_class_names = opts.testmodules)
 
     elif opts.version:
         show_version()
