@@ -292,12 +292,14 @@ class FrankWolfe():
         '''
 
         n, p = Y.shape
-        nan_mask = np.isnan(Y) # the input may contain NaN entries
 
         # Set class attributes
-        self.Y_ = Y
+        # to avoid nan values, set nan to zero for calculation.
+        # but remember the indices of nan values.
+        nan_mask = np.isnan(Y) # the input may contain NaN entries
+        self.Y_ = np.nan_to_num(Y, copy = True, nan = 0.0)
         # Combine the NaN mask and the input mask, if provided.
-        # Prefer to keep it None if there is no mask
+        # Prefer to keep it None if there is no mask for slightly faster calculations.
         input_mask = np.zeros((n, p), dtype=bool) if mask is None else mask
         self.mask_ = np.logical_or(nan_mask, input_mask)
         if not np.any(self.mask_): self.mask_ = None
