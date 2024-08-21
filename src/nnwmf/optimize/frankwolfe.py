@@ -314,7 +314,7 @@ class FrankWolfe():
             else:
                 self.rank_ = r
                 self.l1_thres_ = 1.0
-            self.l1_thres_ *= np.linalg.norm(Y, ord = 1) / np.sqrt(np.max(Y.shape))
+            self.l1_thres_ *= np.linalg.norm(self.Y_, ord = 1) / np.sqrt(np.max(self.Y_.shape))
 
         # Step 0
         X = np.zeros_like(Y) if X0 is None else X0.copy()
