@@ -152,7 +152,8 @@ class FrankWolfe_CV():
 
         # Generate list of rseq for CV
         if rseq is None:
-            nucnormY = np.linalg.norm(Y_cent, 'nuc')
+            # Nuclear Norm cannot handle NaN values, set them to 0.
+            nucnormY = np.linalg.norm(np.nan_to_num(Y_cent, nan = 0.0), 'nuc')
             rseq = self._generate_rseq(nucnormY)
         if self.do_reverse_path_:
             rseq = rseq[::-1]
@@ -232,10 +233,3 @@ class FrankWolfe_CV():
         Y_miss = Y.copy()
         Y_miss[mask] = np.nan
         return Y_miss
-
-    #def _generate_masked_input(self, Y, mask):
-    #    Ymiss_nan = Y.copy()
-    #    Ymiss_nan[mask] = np.nan
-    #    Ymiss_nan_cent = Ymiss_nan - np.nanmean(Ymiss_nan, axis = 0, keepdims = True)
-    #    Ymiss_nan_cent[mask] = 0.0
-    #    return Ymiss_nan_cent
