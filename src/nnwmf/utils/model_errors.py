@@ -28,7 +28,7 @@ def get(original, recovered, mask = None, method = 'rmse'):
 
 def get_mse(original, recovered, mask):
     n = np.sum(mask)
-    mse = np.sum(np.square((original - recovered) * mask)) / n
+    mse = np.nansum(np.square((original - recovered) * mask)) / n
     return mse
 
 
@@ -38,8 +38,8 @@ def get_rmse(original, recovered, mask):
 
 
 def get_psnr(original, recovered, mask):
-    omax = np.max(original[mask == 1])
-    omin = np.min(original[mask == 1])
+    omax = np.max(original[mask])
+    omin = np.min(original[mask])
     maxsig2 = np.square(omax - omin)
     mse = get_mse(original, recovered, mask)
     res = 10 * np.log10(maxsig2 / mse)
