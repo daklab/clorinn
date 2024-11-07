@@ -1,6 +1,6 @@
 
-from nnwmf.utils.unittest_tester import UnittestTester
-from nnwmf import tests as mtests
+from colormann.utils.unittest_tester import UnittestTester
+from colormann import tests as mtests
 
 import inspect
 
