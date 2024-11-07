@@ -1,10 +1,11 @@
-# NNWMF
+# Colormann
 
-NNWMF extracts the shared and distinct hidden components from a noisy data matrix $\mathbf{X}$
+Colormann (**Co**nvex **Lo**w **R**ank **M**atrix **A**pproximation using **N**uclear **N**orm constraint)
+extracts the shared and distinct hidden components from a noisy data matrix $\mathbf{X}$
 using two steps:
   1. Decompose $\mathbf{X}$ as the sum of a low-rank component ($\mathbf{Y}$) and a sparse component ($\mathbf{M}$).
-  NNWMF provides a choice of several convex algorithms for the low rank matrix approximation (LRMA),
-  using a combination of weighted nuclear norm and L1 norm regularization (see below).
+  Colormann provides a choice of several convex algorithms for the low rank matrix approximation (LRMA),
+  using a combination of weighted nuclear norm and $\ell_1$ norm regularization (see below).
   2. Decompose $\mathbf{Y}$, $\mathbf{M}$ or their sum ($\mathbf{Y} + \mathbf{M}$)
   as a product of loadings and factors using singular value decomposition (SVD).
 
@@ -24,13 +25,13 @@ The following algorithms have been implemented:
 
 The software can be installed directly from github using `pip`:
 ```bash
-pip install git+https://github.com/banskt/weighted-pca-frank-wolfe.git
+pip install git+https://github.com/banskt/colormann.git
 ```
 
 For development, download this repository and install using the `-e` flag:
 ```bash
-git clone https://github.com/banskt/weighted-pca-frank-wolfe.git nnwmf # or use the SSH link
-cd nnwmf
+git clone https://github.com/banskt/colormann.git colormann # or use the SSH link
+cd colormann
 pip install -e .
 ```
 
