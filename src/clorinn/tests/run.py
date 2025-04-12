@@ -1,6 +1,6 @@
 
-from colormann.utils.unittest_tester import UnittestTester
-from colormann import tests as mtests
+from clorinn.utils.unittest_tester import UnittestTester
+from clorinn import tests as mtests
 
 import inspect
 
