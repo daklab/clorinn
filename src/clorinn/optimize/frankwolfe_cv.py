@@ -17,9 +17,10 @@ class FrankWolfe_CV():
 
         test_size : float, default=None
             Fraction of test data for a single split. If specified,
-            then each fold contains `test_size * n * p` elements, where `(n,p)`
-            is the size of the input matrix. If set to None, then it is
-            automatically estimated from the number of folds.
+            then each fold contains `test_size * N` elements, where `N`
+            is number of observed entries in the input matrix.
+            If set to None, then it is automatically estimated from 
+            the number of folds.
 
         shuffle : boolean, default=True
             Whether to shuffle the fold indices before splitting the data
@@ -206,22 +207,65 @@ class FrankWolfe_CV():
         return rseq
 
 
-    def _generate_fold_labels(self, Y):
+    # def _generate_fold_labels(self, Y):
+    #     """
+    #     Provides train/test indices to split data in train/test sets.
+    #     """
+    #     n, p = Y.shape
+    #     fold_labels = np.ones(n * p)
+    #     if self.test_size_ is None:
+    #         ntest = int ((n * p) / self.kfolds_) 
+    #     else:
+    #         ntest = int(self.test_size_ * n * p)
+    #     for k in range(1, self.kfolds_):
+    #         start = k * ntest
+    #         end = (k + 1) * ntest
+    #         fold_labels[start: end] = k + 1
+    #     if self.do_shuffle_:
+    #         np.random.shuffle(fold_labels)
+    #     return fold_labels.reshape(n, p)
+
+    def _generate_fold_labels(self, Y, nan_label = 0):
         """
-        Provides train/test indices to split data in train/test sets.
+        Provides train/test fold labels for entries of Y, ignoring NaNs.
+    
+        Parameters
+        ----------
+        Y : array (n x p)
+            Input matrix possibly containing NaNs.
+        self.kfolds_ : int
+            Number of cross-validation folds.
+        self.test_size_ : float in (0,1) or None
+            Proportion of entries in each fold. If None, uniform split.
+        self.do_shuffle_ : bool
+            Whether to shuffle observed entries before assigning folds.
+        nan_label : int
+            Label used for NaN locations (default 0)
         """
+    
         n, p = Y.shape
-        fold_labels = np.ones(n * p)
+        mask = ~np.isnan(Y)              # True for observed entries
+        idx = np.where(mask.ravel())[0]  # Indices of observed entries (flattened)
+    
+        n_obs = len(idx)
+        fold_labels = np.full(n * p, nan_label, dtype=int)  # All NaN by default
+    
+        # Number of observed entries per fold
         if self.test_size_ is None:
-            ntest = int ((n * p) / self.kfolds_) 
+            ntest = n_obs // self.kfolds_
         else:
-            ntest = int(self.test_size_ * n * p)
-        for k in range(1, self.kfolds_):
-            start = k * ntest
-            end = (k + 1) * ntest
-            fold_labels[start: end] = k + 1
+            ntest = int(self.test_size_ * n_obs)
+    
+        # Shuffle observed indices if requested
         if self.do_shuffle_:
-            np.random.shuffle(fold_labels)
+            np.random.shuffle(idx)
+    
+        # Assign fold labels only to observed entries
+        for k in range(self.kfolds_):
+            start = k * ntest
+            end = (k + 1) * ntest if k < self.kfolds_ - 1 else n_obs
+            fold_labels[idx[start:end]] = k + 1
+    
         return fold_labels.reshape(n, p)
 
 
