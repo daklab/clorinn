@@ -167,10 +167,13 @@ class FrankWolfe():
         '''
         Xmask = self._get_masked(X)
         # The * operator can be used as a shorthand for np.multiply on ndarrays.
-        if self.weight_mask_ is None:
-            fx = 0.5 * np.linalg.norm(self.Y_ - Xmask, 'fro')**2
+        if self.model_ == 'nnm-corr':
+            fx = 0.5 * np.linalg.norm(self.L_inv_ @ (self.Y_ - Xmask), 'fro')**2
         else:
-            fx = 0.5 * np.linalg.norm(self.weight_mask_ * (self.Y_ - Xmask), 'fro')**2
+            if self.weight_mask_ is None:
+                fx = 0.5 * np.linalg.norm(self.Y_ - Xmask, 'fro')**2
+            else:
+                fx = 0.5 * np.linalg.norm(self.weight_mask_ * (self.Y_ - Xmask), 'fro')**2
         return fx
 
 
@@ -179,16 +182,22 @@ class FrankWolfe():
         Gradient of the objective function.
         '''
         Xmask = self._get_masked(X)
-        if self.weight_mask_ is None:
-            gx = Xmask - self.Y_
+        if self.model_ == 'nnm-corr':
+            gx = self.Sigma_inv_ @ (Xmask - self.Y_)
         else:
-            gx = np.square(self.weight_mask_) * (Xmask - self.Y_)
+            if self.weight_mask_ is None:
+                gx = Xmask - self.Y_
+            else:
+                gx = np.square(self.weight_mask_) * (Xmask - self.Y_)
         return gx
 
 
     def _fw_step_size(self, dg, D):
         if self.weight_mask_ is None:
-            denom = np.linalg.norm(D, 'fro')**2
+            if self.model_ == 'nnm-corr':
+                denom = np.linalg.norm(self.L_inv_ @ D, 'fro')**2
+            else:
+                denom = np.linalg.norm(D, 'fro')**2
         else:
             denom = np.linalg.norm(self.weight_mask_ * D, 'fro')**2
         ss = dg / denom
@@ -246,7 +255,9 @@ class FrankWolfe():
         return eucp.proj.reshape(n, p)
 
 
-    def fit(self, Y, r, weight = None, mask = None, X0 = None, Ytrue = None):
+    def fit(self, Y, r, 
+            weight = None, mask = None, X0 = None, Ytrue = None,
+            L_inv = None, Sigma_inv = None):
 
         '''
         Wrapper function for the low rank matrix approximation (LRMA)
@@ -304,9 +315,13 @@ class FrankWolfe():
         self.mask_ = np.logical_or(nan_mask, input_mask)
         if not np.any(self.mask_): self.mask_ = None
 
+        if self.model_ == 'nnm-corr':
+            self.L_inv_ = L_inv
+            self.Sigma_inv_ = Sigma_inv
+
         self.weight_ = weight
         self.weight_mask_ = self._get_masked(self.weight_)
-        if self.model_ == 'nnm':
+        if self.model_ == 'nnm' or self.model_ == 'nnm-corr':
             self.rank_ = r
         elif self.model_ == 'nnm-sparse':
             if isinstance(r, tuple):
@@ -340,7 +355,7 @@ class FrankWolfe():
                 self.logger_.warn("True input not provided. Using observed input matrix for RMSE calculation.")
                 Ytrue = self.Y_.copy()
             assert Ytrue.shape == Y.shape
-            if self.model_ == 'nnm':
+            if self.model_ == 'nnm' or self.model_ == 'nnm-corr':
                 self.rmse_ = [merr.get(Ytrue, X, method = self.benchmark_method_)]
             elif self.model_ == 'nnm-sparse':
                 self.rmse_          = [merr.get(Ytrue, X + M, method = self.benchmark_method_)]
@@ -353,6 +368,9 @@ class FrankWolfe():
 
             if self.model_ == 'nnm':
                 X, G, dg, step = self._fw_one_step_nnm(X)
+                fx = self._f_objective(X)
+            elif self.model_ == 'nnm-corr':
+                X, G, dg, step = self._fw_one_step_nnm_corr(X)
                 fx = self._f_objective(X)
             elif self.model_ == 'nnm-sparse':
                 X, M, G, dg, step = self._fw_one_step_nnm_sparse(X, M)
@@ -375,7 +393,7 @@ class FrankWolfe():
                 self.fl_list_.append(fl)
 
             if self.is_benchmark_:
-                if self.model_ == 'nnm':
+                if self.model_ == 'nnm' or self.model_ == 'nnm-corr':
                     self.rmse_.append(merr.get(Ytrue, X, method = self.benchmark_method_))
                 elif self.model_ == 'nnm-sparse':
                     self.rmse_.append(merr.get(Ytrue, X + M, method = self.benchmark_method_))
@@ -419,6 +437,23 @@ class FrankWolfe():
         step = self._fw_step_size(dg, D)
         # 6. Update
         Xnew = X - step * D
+        return Xnew, G, dg, step
+
+
+    def _fw_one_step_nnm_corr(self, X):
+        # 1. Gradient for X_(t-1)
+        G = self._f_gradient(X)
+        # 2. Linear optimization subproblem
+        S = self._linopt_oracle_nucnorm(G)
+        # 3. Define D
+        D = S - X
+        # 4. Duality gap
+        dg = np.sum((X - S) * G)
+        # dg = np.trace(D.T @ G)
+        # 5. Step size
+        step = self._fw_step_size(dg, D)
+        # 6. Update
+        Xnew = X + step * D
         return Xnew, G, dg, step
 
 
