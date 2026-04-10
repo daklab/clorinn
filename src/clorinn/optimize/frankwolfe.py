@@ -119,6 +119,9 @@ class FrankWolfe():
         self.tol_ = tol
         self.step_size_tol_ = step_tol
         self.fxrel_tol_ = rel_tol
+        self.svd_u_prev_ = None
+        self.svd_vt_prev_ = None
+        self.svd_n_iter_ = None
         self.show_progress_ = show_progress
         self.prog_step_skip_ = print_skip
         if self.show_progress_ and self.prog_step_skip_ is None:
@@ -164,31 +167,31 @@ class FrankWolfe():
         Objective function
         Y is observed, X is estimated
         W is the weight of each observation.
+        Masked entries are excluded from the objective.
         '''
-        Xmask = self._get_masked(X)
-        # The * operator can be used as a shorthand for np.multiply on ndarrays.
+        R = self.Y_ - X
+        R = self._get_masked(R)
         if self.model_ == 'nnm-corr':
-            fx = 0.5 * np.linalg.norm(self.L_inv_ @ (self.Y_ - Xmask), 'fro')**2
-        else:
-            if self.weight_mask_ is None:
-                fx = 0.5 * np.linalg.norm(self.Y_ - Xmask, 'fro')**2
-            else:
-                fx = 0.5 * np.linalg.norm(self.weight_mask_ * (self.Y_ - Xmask), 'fro')**2
+            R = self.L_inv_ @ R
+        if self.weight_mask_ is not None:
+            R = self.weight_mask_ * R
+        fx = 0.5 * np.linalg.norm(R, 'fro')**2
         return fx
 
 
     def _f_gradient(self, X):
         '''
         Gradient of the objective function.
+        Y is observed, X is estimated
+        W is the weight of each observation.
+        Masked entries are excluded from the gradient.
         '''
-        Xmask = self._get_masked(X)
+        G = X - self.Y_
+        gx = self._get_masked(G)
         if self.model_ == 'nnm-corr':
-            gx = self.Sigma_inv_ @ (Xmask - self.Y_)
-        else:
-            if self.weight_mask_ is None:
-                gx = Xmask - self.Y_
-            else:
-                gx = np.square(self.weight_mask_) * (Xmask - self.Y_)
+            gx = self.Sigma_inv_ @ gx
+        if self.weight_mask_ is not None:
+            gx = np.square(self.weight_mask_) * gx
         return gx
 
 
@@ -203,7 +206,7 @@ class FrankWolfe():
         ss = dg / denom
         ss = min(ss, 1.0)
         if ss < 0:
-            self.logger_.warn("Step Size is less than 0. Using last valid step size.")
+            self.logger_.warn(f"Step Size is less than 0 ({ss:g}). Using last valid step size.")
             ss = self.st_list_[-1]
         return ss
 
@@ -220,30 +223,43 @@ class FrankWolfe():
         Linear optimization oracle,
         where the feasible region is a l1 norm ball for some r
         '''
-        maxidx = np.unravel_index(np.argmax(X), X.shape)
+        idx = np.unravel_index(np.argmax(np.abs(X)), X.shape)
         S = np.zeros_like(X)
-        S[maxidx] = - self.l1_thres_
+        sgn = np.sign(X[idx])
+        if sgn != 0:
+            S[idx] = - self.l1_thres_ * sgn
         return S
 
 
-    def _linopt_oracle_nucnorm(self, X):
+    def _linopt_oracle_nucnorm(self, X, warm_start_uv = False, svd_max_iter = None):
         '''
         Linear optimization oracle,
         where the feasible region is a nuclear norm ball for some r
         '''
-        U1, V1_T = self._get_singular_vectors(X)
+        U1, V1_T = self._get_singular_vectors(X, warm_start = warm_start_uv, max_iter = svd_max_iter)
         S = - self.rank_ * U1 @ V1_T
         return S
 
 
-    def _get_singular_vectors(self, X):
-        max_iter = self.svd_max_iter_
+    def _get_singular_vectors(self, X, warm_start = False, max_iter = None):
+        if max_iter is None:
+            max_iter = self.svd_max_iter_
+
         if max_iter is None:
             nstep = len(self.st_list_) + 1
             max_iter = 10 + int(nstep / 20)
-            max_iter = min(max_iter, 25)
+            max_iter = min(max_iter, 100)
+
         svd = TopCompSVD(method = self.svd_method_, max_iter = max_iter)
-        svd.fit(X)
+        if warm_start and self.svd_method_ == 'power':
+            svd.fit(X, u0 = self.svd_u_prev_, v0 = self.svd_vt_prev_)
+        else:
+            svd.fit(X)
+
+        self.svd_u_prev_ = svd.u1
+        self.svd_vt_prev_ = svd.v1_t
+        self.svd_n_iter_ = svd.n_iter
+
         return svd.u1, svd.v1_t
 
 
@@ -424,6 +440,56 @@ class FrankWolfe():
 
         return
 
+
+    def _fw_one_step(self):
+        return
+
+
+    def _get_duality_gap(G, warm_start_uv = False, svd_max_iter = None):
+        if self.model_ == "nnm" or self.model_ == "nnm-corr":
+            # 1. Linear optimization subproblem
+            S = self._linopt_oracle_nucnorm(G, warm_start_uv = warm_start_uv, svd_max_iter = svd_max_iter)
+            # 2. Define D
+            D = X - S
+            # 3. Duality gap
+            dg = np.trace(D.T @ G)
+        elif self.model_ == "nnm-sparse":
+            # 1. Linear optimization subproblem
+            SL = self._linopt_oracle_nucnorm(G, warm_start_uv = warm_start_uv, svd_max_iter = svd_max_iter)
+            SM = self._linopt_oracle_l1norm(G)
+            # 2. Define D
+            DL = L - SL
+            DM = M - SM
+            # 4. Duality gap
+            dg = np.trace(DL.T @ G) + np.trace(DM.T @ G)
+        return dg
+
+
+
+    def _try_positive_dg():
+        S, D, dg = _get_duality_gap(G, warm_start_uv = False, svd_max_iter = self.svd_max_iter_)
+        # Guard against negative dg
+        # If the dg is negative, try updating u1 and v1 to more accurate values.
+        if dg < 0:
+            self.logger_.warn(f"Duality gap is less than 0 ({dg:g}).")
+            if self.svd_method_ == 'power':
+                self.logger_.warn(f"Maybe power iteration didn't converge?. Retrying SVD power iteration.")
+                n_rep = 1
+                if self.svd_max_iter_ is not None:
+                    svd_max_iter = self.svd_max_iter_ * 2
+                else:
+                    svd_max_iter = 100
+                while n_rep <= 5:
+                    S, D, dg = _get_duality_gap(G, warm_start_uv = True, svd_max_iter = svd_max_iter)
+                    self.logger_.warn(f"Power iteration trial {n_rep}. dg = {dg:g}, n_iter = {self.svd_n_iter_}, max_iter = {svd_max_iter}")
+                    if dg > 0:
+                        break
+                    n_rep += 1
+                    svd_max_iter *= 2
+                if dg < 0:
+                    self.logger_.warn(f"Power iteration failed to improve duality gap (dg = {dg:g}). Check manually.")
+
+
     def _fw_one_step_nnm(self, X):
         # 1. Gradient for X_(t-1)
         G = self._f_gradient(X)
@@ -433,6 +499,30 @@ class FrankWolfe():
         D = X - S
         # 4. Duality gap
         dg = np.trace(D.T @ G)
+
+        # Guard against negative dg
+        # If the dg is negative, try updating u1 and v1 to more accurate values.
+        if dg < 0:
+            self.logger_.warn(f"Duality gap is less than 0 ({dg:g}).")
+            if self.svd_method_ == 'power':
+                self.logger_.warn(f"Maybe power iteration didn't converge?. Retrying SVD power iteration.")
+                n_rep = 1
+                if self.svd_max_iter_ is not None:
+                    svd_max_iter = self.svd_max_iter_ * 2
+                else:
+                    svd_max_iter = 100
+                while n_rep <= 5:
+                    S = self._linopt_oracle_nucnorm(G, warm_start_uv = True, svd_max_iter = svd_max_iter)
+                    D = X - S
+                    dg = np.trace(D.T @ G)
+                    self.logger_.warn(f"Power iteration trial {n_rep}. dg = {dg:g}, n_iter = {self.svd_n_iter_}, max_iter = {svd_max_iter}")
+                    if dg > 0:
+                        break
+                    n_rep += 1
+                    svd_max_iter *= 2
+                if dg < 0:
+                    self.logger_.warn(f"Power iteration failed to improve duality gap (dg = {dg:g}). Check manually.")
+
         # 5. Step size
         step = self._fw_step_size(dg, D)
         # 6. Update
@@ -469,8 +559,8 @@ class FrankWolfe():
         # 4. Duality gap
         dg = np.trace(DL.T @ G) + np.trace(DM.T @ G)
         # 5. Step size
-        #step = self._fw_step_size(dg, DL + DM)
-        step = self._fw_step_size(dg, DL)
+        step = self._fw_step_size(dg, DL + DM)
+        #step = self._fw_step_size(dg, DL)
         # 6. Update
         Lnew = L - step * DL
         Mnew = M - step * DM
