@@ -13,9 +13,17 @@ from . import project
 
 loggers = {}
 
+class ShortNameFormatter(logging.Formatter):
+    """Strip the top-level package prefix from logger names."""
+    def format(self, record):
+        parts = record.name.split('.', 1)      # ['clorinn', 'optimize.frankwolfe']
+        record.name = parts[1] if len(parts) > 1 else parts[0]
+        return super().format(record)
+
 
 def get_new_formatter(fmt = project.logging_format()):
-    return logging.Formatter(fmt)
+    #return logging.Formatter(fmt)
+    return ShortNameFormatter(fmt)
 
 
 def get_new_handler(formatter, logfile = None):

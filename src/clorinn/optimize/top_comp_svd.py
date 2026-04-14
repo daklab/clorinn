@@ -18,6 +18,8 @@ class TopCompSVD():
     def fit(self, X, u0 = None, v0 = None, tol = 1e-8):
         if self._method == 'power':
             self._u1, self._v1h = self.fit_power(X, u0 = u0, v0 = v0, tol = tol)
+        elif self._method == 'left-gram':
+            self._u1, self._v1h = self.fit_left_gram(X)
         elif self._method == 'randomized':
             self._u1, self._v1h = self.fit_randomized(X)
         elif self._method == 'direct':
@@ -85,6 +87,55 @@ class TopCompSVD():
 
         return u1, v1h
 
+
+    def fit_left_gram(self, X, tol=1e-12):
+        """
+        Exact top singular vectors via eigendecomposition of X X^T.
+
+        Best when X is tall-skinny in the *row* dimension, i.e. n << p.
+        For GWAS matrices with shape (n_traits, n_snps), this is ideal when
+        n_traits is small and n_snps is large.
+        """
+        n, p = X.shape
+
+        # Small symmetric Gram matrix
+        G = X @ X.T
+        G = 0.5 * (G + G.T)  # enforce symmetry numerically
+
+        # Largest eigenpair of X X^T
+        evals, U = np.linalg.eigh(G)
+        idx = np.argmax(evals)
+
+        lam1 = float(evals[idx])
+        lam1 = max(lam1, 0.0)  # guard against tiny negative roundoff
+        sigma1 = np.sqrt(lam1)
+
+        u = U[:, idx]
+
+        # Recover v from v = X^T u / sigma
+        if sigma1 <= tol:
+            # X is numerically zero: return zero direction so S = 0
+            v = np.zeros(p, dtype=X.dtype)
+        else:
+            v = X.T @ u
+            nv = np.linalg.norm(v)
+
+            if nv <= tol:
+                v = np.zeros(p, dtype=X.dtype)
+            else:
+                v /= nv
+
+                # Sign convention: make u^T X v nonnegative
+                if float(u.T @ X @ v) < 0:
+                    u = -u
+                    v = -v
+
+        self._n_iter = 1
+        u1 = u.reshape(-1, 1)
+        v1h = v.reshape(1, -1)
+        return u1, v1h
+
+
     def fit_randomized(self, X):
         u, s, vh = randomized_svd(X,
                         n_components = 1, n_iter = self._max_iter,
@@ -92,9 +143,13 @@ class TopCompSVD():
                         random_state = 0)
         return u, vh
 
+
     def fit_direct(self, X):
         u, s, vh = np.linalg.svd(X, full_matrices=False)
-        return u[:, [0]], vh[[0], :]
+        u1  = u[:, [0]]
+        v1h = vh[[0], :]
+        return u1, v1h
+
 
     @property
     def u1(self):

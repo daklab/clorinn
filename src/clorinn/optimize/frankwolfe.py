@@ -170,6 +170,11 @@ class FrankWolfe():
     def steps(self):
         return self.st_list_
 
+    
+    @property
+    def n_iter(self):
+        return self.iter_num_
+
 
     # ------------------------------------------------------------------
     # Objective, gradient, and step-size
@@ -299,6 +304,13 @@ class FrankWolfe():
         else:
             svd.fit(X)
 
+        self.logger_.debug(f"SVD: Max iter = {max_iter}, performed iter = {svd.n_iter}")
+        if self.svd_u_prev_ is not None and self.svd_vt_prev_ is not None:
+            self.logger_.debug(
+                f"     u1 norm change = {np.linalg.norm(svd.u1 - self.svd_u_prev_):g}, "
+                f"v1t norm change = {np.linalg.norm(svd.v1_t - self.svd_vt_prev_):g}"
+            )
+
         self.svd_u_prev_ = svd.u1
         self.svd_vt_prev_ = svd.v1_t
         self.svd_n_iter_ = svd.n_iter
@@ -422,15 +434,18 @@ class FrankWolfe():
         if dg >= 0:
             return result
  
-        self.logger_.warn(f"Duality gap is less than 0 ({dg:g}).")
+        self.logger_.warn(f"Iteration {self.iter_num_}. Duality gap is less than 0 ({dg:g}).")
         if self.svd_method_ != 'power':
             return result
  
         self.logger_.warn("Maybe power iteration didn't converge? Retrying SVD power iteration.")
         svd_max_iter = self.svd_max_iter_ * 2 if self.svd_max_iter_ is not None else 100
         for n_rep in range(1, 6):
+
+            # Use fresh random initialization (warm_start_uv=False) so we don't
+            # get trapped in the basin of a non-dominant singular vector.
             result = oracle_fn(G, *args,
-                               warm_start_uv = True,
+                               warm_start_uv = False,
                                svd_max_iter  = svd_max_iter)
             dg = result[-1]
             self.logger_.warn(
@@ -623,6 +638,9 @@ class FrankWolfe():
         # Initialize data
         # ---------------------
 
+        self.logger_.debug(f"Model = {self.model_}")
+        self.logger_.debug(f"Shape of input data = {Y.shape}")
+
         n, p = Y.shape
 
         # Set class attributes
@@ -636,6 +654,8 @@ class FrankWolfe():
         self.mask_ = np.logical_or(nan_mask, input_mask)
         if not np.any(self.mask_): 
             self.mask_ = None
+        else:
+            self.logger_.debug(f"Using mask on {np.sum(self.mask_)} entries.")
 
         if self.model_ == 'nnm-corr':
             if L_inv is None or Sigma_inv is None:
@@ -645,6 +665,12 @@ class FrankWolfe():
 
         self.weight_ = weight
         self.weight_mask_ = self._get_masked(self.weight_)
+
+        if self.weight_ is not None:
+            self.logger_.debug(f"Using input weights on input data.")
+        else:
+            self.logger_.debug(f"No input weights provided.")
+
 
         # ---------------------
         # Initialize constraints
@@ -678,6 +704,7 @@ class FrankWolfe():
         self.dg_list_ = [dg]
         self.st_list_ = [step]
         self.cpu_time_ = [1e-8] # do not use 0 to avoid log10 error.
+        self.iter_num_ = 0
 
         if self.model_ == 'nnm-sparse':
             fm = self._f_objective(M)
@@ -707,6 +734,9 @@ class FrankWolfe():
         # ---------------------
         for i in range(self.max_iter_):
 
+            self.iter_num_ += 1
+            self.logger_.debug(f"Iteration {self.iter_num_}.")
+
             if self.model_ in ('nnm', 'nnm-corr'):
                 X, G, dg, step = self._fw_one_step_nnm(X)
                 fx = self._f_objective(X)
@@ -716,6 +746,8 @@ class FrankWolfe():
                 fx = self._f_objective(X + M)
                 fm = self._f_objective(M)
                 fl = self._f_objective(X)
+
+            self.logger_.debug(f"Step size {step:.3f}. Duality Gap {dg:g}.")
 
             # Append iteration history
             cpu_time = time.process_time()
@@ -744,8 +776,8 @@ class FrankWolfe():
             # then the logging level is DEBUG but the steps are not printed. 
             # I can live with that bug.
             if self.show_progress_:
-                if (i % self.prog_step_skip_ == 0):
-                    self.logger_.info(f"Iteration {i}. Step size {step:.3f}. Duality Gap {dg:g}")
+                if (self.iter_num_ == 1) or (self.iter_num_ % self.prog_step_skip_ == 0):
+                    self.logger_.info(f"Iteration {i+1}. Step size {step:.3f}. Duality Gap {dg:g}")
 
             if self._do_stop():
                 break
@@ -755,7 +787,7 @@ class FrankWolfe():
                 self.convergence_msg_ = f"Maxinum number of iterations reached."
 
 
-        self.logger_.info(f"Iteration {i}. Step size {step:.3f}. Duality Gap {dg:g}")
+        self.logger_.info(f"Stopping at iteration {self.iter_num_}. Step size {step:.3f}. Duality Gap {dg:g}")
         self.logger_.info(self.convergence_msg_)
         self.X_ = X
         if self.model_ == 'nnm-sparse': 

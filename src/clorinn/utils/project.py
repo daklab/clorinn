@@ -28,7 +28,7 @@ def logging_level():
 
 
 def logging_format():
-    return "%(asctime)s | %(name)-40s | %(levelname)-7s | %(message)s"
+    return "%(asctime)s | %(name)-24s | %(levelname)-7s | %(message)s"
 
 
 def logging_file():

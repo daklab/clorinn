@@ -25,6 +25,8 @@ here: https://lcondat.github.io/software.html
 # Author: Saikat Banerjee
 
 import numpy as np
+import logging
+from ..utils.logs import CustomLogger
 
 class EuclideanProjection():
 
@@ -75,8 +77,9 @@ class EuclideanProjection():
 
     @staticmethod
     def _simplex_proj_sort(y, a):
+        n = y.shape[0]
         u = np.sort(y)[::-1]
-        ukvals = (np.cumsum(u) - a) / np.arange(1, y.shape[0] + 1)
+        ukvals = (np.cumsum(u) - a) / np.arange(1, n + 1)
         k = np.nonzero(ukvals < u)[0][-1]
         x = np.clip(y - ukvals[k], a_min=0, a_max=None)
         return x
@@ -143,3 +146,265 @@ class EuclideanProjection():
         # Step 5
         x = np.clip(y - rho, a_min=0, a_max=None)
         return x
+
+
+class NuclearNormProjection():
+    """
+    Orthogonal projection onto the nuclear norm ball:
+        { X ∈ R^{n×p}  |  ||X||_* <= r }
+ 
+    The projection is obtained by taking the thin SVD of X,
+    projecting the singular value vector onto the scaled simplex
+    { s >= 0, sum(s) <= r }, and reconstructing.
+ 
+    Parameters
+    ----------
+    method : string, default='sort'
+        Method for the simplex sub-projection. See EuclideanProjection.
+    """
+ 
+    def __init__(self, method = 'sort'):
+        self.method_ = method
+        return
+ 
+ 
+    @property
+    def proj(self):
+        return self.Xproj_
+ 
+ 
+    @property
+    def U(self):
+        return self.U_
+ 
+ 
+    @property
+    def s(self):
+        return self.s_
+ 
+ 
+    @property
+    def Vt(self):
+        return self.Vt_
+ 
+ 
+    @property
+    def is_clipped(self):
+        """Whether the projection had to clip (constraint was active)."""
+        return self.is_clipped_
+ 
+ 
+    def fit(self, X, r):
+        """
+        Project X onto the nuclear norm ball of radius r.
+ 
+        Parameters
+        ----------
+        X : np.ndarray [size (n, p); dtype: float]
+            Input matrix.
+        r : float
+            Nuclear norm radius.
+        """
+        U, s, Vt = np.linalg.svd(X, full_matrices=False)
+        nuc = np.sum(s)
+ 
+        if nuc <= r:
+            self.is_clipped_ = False
+            self.s_ = s
+        else:
+            self.is_clipped_ = True
+            eucp = EuclideanProjection(method = self.method_, target = 'simplex')
+            eucp.fit(s, a = r)
+            self.s_ = eucp.proj
+            #self.s_ = EuclideanProjection._simplex_proj_sort(s, r)
+ 
+        self.U_  = U
+        self.Vt_ = Vt
+        self.Xproj_ = (U * self.s_) @ Vt
+        self.nuclear_norm_before_ = nuc
+        self.nuclear_norm_after_  = np.sum(self.s_)
+        return
+ 
+ 
+class PGDWarmStart():
+    """
+    Adaptive projected gradient descent for warm-starting Frank-Wolfe
+    on the nuclear-norm-constrained matrix completion problem:
+ 
+        min   0.5 * || P_Omega (X - Y) ||_F^2
+        s.t.  ||X||_* <= r
+ 
+    PGD iterates until either
+        (a) the nuclear norm constraint becomes active (projection clips),
+            at which point Frank-Wolfe's rank-1 updates are more natural, or
+        (b) the objective stalls, meaning the solution lies in the interior
+            and FW will confirm convergence via the duality gap.
+ 
+    Parameters
+    ----------
+    max_iter : integer, default=50
+        Maximum number of PGD iterations.
+ 
+    rel_tol : float, default=1e-6
+        Relative tolerance on the objective for detecting stall.
+ 
+    simplex_method : string, default='sort'
+        Method for the simplex sub-projection.
+        See EuclideanProjection for available options.
+ 
+    show_progress : boolean, default=False
+        Print iteration progress.
+ 
+    print_skip : integer, default=10
+        Number of steps skipped between each printed step
+        if `show_progress = True`.
+    """
+ 
+    def __init__(self, max_iter = 50, rel_tol = 1e-6,
+                 simplex_method = 'sort',
+                 show_progress = False,
+                 print_skip = 1,
+                 debug = False,
+                 suppress_warnings = True):
+        self.max_iter_ = max_iter
+        self.rel_tol_  = rel_tol
+        self.simplex_method_ = simplex_method
+        self.show_progress_  = show_progress
+        self.print_skip_     = print_skip
+        # set logger for this class
+        loglevel = None
+        if debug: 
+            loglevel = logging.DEBUG
+        elif show_progress:
+            loglevel = logging.INFO
+        elif suppress_warnings:
+            loglevel = logging.ERROR
+        self.logger_ = CustomLogger(__name__, level = loglevel)
+        self.suppress_warnings_ = suppress_warnings
+        return
+ 
+ 
+    @property
+    def X(self):
+        return self.X_
+ 
+ 
+    @property
+    def fx(self):
+        return self.fx_list_
+ 
+ 
+    @property
+    def n_iter(self):
+        return self.n_iter_
+ 
+ 
+    @property
+    def converged_in_interior(self):
+        return self.converged_interior_
+ 
+ 
+    def fit(self, Y, r, mask = None, weight = None):
+        """
+        Run PGD warm start.
+ 
+        Parameters
+        ----------
+        Y : np.ndarray [size (n, p); dtype: float]
+            Input data matrix (NaN values should already be replaced by 0).
+ 
+        r : float
+            Nuclear norm radius.
+ 
+        mask : np.ndarray [size (n, p); dtype: bool] or None
+            True for entries to ignore (NaN or held out).
+ 
+        weight : np.ndarray [size (n, p); dtype: float] or None
+            Per-element weights.
+ 
+        Returns
+        -------
+        X : np.ndarray [size (n, p); dtype: float]
+            Feasible warm-start iterate with ||X||_* <= r.
+        """
+        n, p = Y.shape
+        obs = np.ones((n, p), dtype=bool) if mask is None else ~mask
+        wobs = None
+        if weight is not None:
+            wobs = np.where(obs, weight, 0.0)
+ 
+        X = np.zeros_like(Y)
+        projector = NuclearNormProjection(method = self.simplex_method_)
+        fx_old = np.inf
+        self.fx_list_ = []
+        self.converged_interior_ = False
+ 
+        # Step size = 1/L where L is the Lipschitz constant of the gradient.
+        # Unweighted: L = 1. Weighted: L = max(w_ij^2).
+        if wobs is None:
+            eta = 1.0
+        else:
+            eta = 1.0 / np.max(np.square(wobs))
+ 
+        for t in range(self.max_iter_):
+
+            self.n_iter_ = t + 1
+
+            # Objective: 0.5 * ||W * P_Omega(X - Y)||^2
+            R = np.where(obs, X - Y, 0.0)
+            if wobs is not None:
+                R = wobs * R
+            fx = 0.5 * np.linalg.norm(R, 'fro')**2
+            self.fx_list_.append(fx)
+ 
+            # Gradient (accounting for weights)
+            G = np.where(obs, X - Y, 0.0)
+            if wobs is not None:
+                G = np.square(wobs) * G
+ 
+            # Gradient step
+            X_candidate = X - eta * G
+ 
+            # Project onto nuclear norm ball
+            projector.fit(X_candidate, r)
+            X = projector.proj
+ 
+            if self.show_progress_:
+                if (self.n_iter_ == 1) or (self.n_iter_ % self.print_skip_ == 0):
+                    nuc = projector.nuclear_norm_after_
+                    tag = "clipped" if projector.is_clipped else "interior"
+                    self.logger_.info(
+                        f"PGD iter {self.n_iter_:4d}  f = {fx:.4f}  "
+                        f"||X||_* = {nuc:.1f}  ({tag})"
+                    )
+
+            # Stop if projection clipped: constraint is active, hand off to FW
+            # if projector.is_clipped:
+            #     if self.show_progress_:
+            #         self.logger_.info(
+            #             f"PGD iter {self.n_iter_:4d}  Nuclear norm constraint active "
+            #             f"({projector.nuclear_norm_before_:.1f} -> {r:.1f}). "
+            #             f"Handing off to FW."
+            #         )
+            #     break
+ 
+            # Stop if objective stalled: converged in interior
+            if t > 0 and np.isfinite(fx_old):
+                rel = abs(fx - fx_old) / max(1.0, abs(fx_old))
+                if rel < self.rel_tol_:
+                    if self.show_progress_:
+                        nuc = projector.nuclear_norm_after_
+                        self.logger_.info(
+                            f"PGD iter {self.n_iter_:4d}  Converged in interior "
+                            f"(||X||_* = {nuc:.1f} < r = {r:.1f})"
+                        )
+                    self.converged_interior_ = True
+                    break
+ 
+            fx_old = fx
+ 
+        else:
+            self.n_iter_ = self.max_iter_
+ 
+        self.X_ = X
+        return
