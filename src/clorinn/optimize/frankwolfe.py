@@ -4,10 +4,10 @@
 import numpy as np
 import time
 import logging
-from .top_comp_svd import TopCompSVD
-from .simplex_projection import EuclideanProjection
+from .objectives import NNMObjective, NNMSparseObjective, NNMCorrObjective
+from .svd import nuclear_norm_oracle
+from .projections import EuclideanProjection
 from ..utils.logs import CustomLogger
-from ..utils import model_errors as merr
 
 class FrankWolfe():
 
@@ -45,20 +45,13 @@ class FrankWolfe():
 
     model : string, default='nnm'
         The model used for the FW algorithm. Options include:
-            'nnm' : Nuclear Norm constraint
+            'nnm'        : Nuclear Norm constraint
             'nnm-sparse' : Nuclear Norm + L1 constraint
+            'nnm-corr'   : Nuclear Norm with correlated error
 
     simplex_method : string, default='sort'
         The method used for the simplex projection of the l1 ball. See 
         EuclideanProjection for available options.
-
-    benchmark : boolean, default=False
-        Whether to calculate the error statistic for benchmarking. If set to `True`,
-        it requires 'Ytrue' in the `fit()` function.
-
-    benchmark_method : string, default='rmse'
-        The error statistic to be calculated for benchmarking. See utils.model_errors 
-        for available options.
 
     tol : float, default=1e-3
         Threshold tolerance for duality gap, see 'stop_criteria'.
@@ -98,19 +91,14 @@ class FrankWolfe():
         show_progress = False` sets logging level to DEBUG. `debug = False, 
         show_progress = True, suppress_warnings = True` sets logging level to INFO.
 
-
-    TO-DO.
-    -----
-        - [ ] Allow multiple error statistic calculation during benchmarking.
     """
     def __init__(self, max_iter = 1000,
             svd_method = 'power', svd_max_iter = None,
             stop_criteria = ['duality_gap', 'step_size', 'relative_objective', 'relative_dg'],
             model = 'nnm', simplex_method = 'sort',
-            benchmark_method = 'rmse',
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
             show_progress = False, print_skip = None,
-            debug = False, suppress_warnings = False, benchmark = False):
+            debug = False, suppress_warnings = False):
                 
         self.max_iter_ = max_iter
         self.model_ = model
@@ -121,14 +109,12 @@ class FrankWolfe():
         self.tol_ = tol
         self.step_size_tol_ = step_tol
         self.fxrel_tol_ = rel_tol
-        self.svd_u_prev_ = None
-        self.svd_vt_prev_ = None
-        self.svd_n_iter_ = None
         self.show_progress_ = show_progress
         self.prog_step_skip_ = print_skip
         if self.show_progress_ and self.prog_step_skip_ is None:
             self.prog_step_skip_ = max(1, int(self.max_iter_ / 100)) * 10
-        # set logger for this class
+
+        # Logger
         loglevel = None
         if debug: 
             loglevel = logging.DEBUG
@@ -137,10 +123,13 @@ class FrankWolfe():
         elif suppress_warnings:
             loglevel = logging.ERROR
         self.logger_ = CustomLogger(__name__, level = loglevel)
+        self.logger_.override_global_default_loglevel(loglevel)
         self.suppress_warnings_ = suppress_warnings
-        # flag the benchmarking, requires Ytrue for calculating errors
-        self.is_benchmark_ = benchmark
-        self.benchmark_method_ = benchmark_method
+
+        # Warm-start state for power-iteration SVD (tracked for logging)
+        self.svd_u_prev_ = None
+        self.svd_vt_prev_ = None
+        self.svd_n_iter_ = None
         return
 
 
@@ -177,159 +166,79 @@ class FrankWolfe():
 
 
     # ------------------------------------------------------------------
-    # Objective, gradient, and step-size
+    # Objective factory
     # ------------------------------------------------------------------
-
-    def _f_objective(self, X):
-        '''
-        Objective function
-        Y is observed, X is estimated
-        W is the weight of each observation.
-        Masked entries are excluded from the objective.
-        '''
-        R = self.Y_ - X
-        R = self._get_masked(R)
-        if self.model_ == 'nnm-corr':
-            R = self.L_inv_ @ R
-        if self.weight_mask_ is not None:
-            R = self.weight_mask_ * R
-        fx = 0.5 * np.linalg.norm(R, 'fro')**2
-        return fx
-
-
-    def _f_gradient(self, X):
-        '''
-        Gradient of the objective function.
-        Y is observed, X is estimated
-        W is the weight of each observation.
-        Masked entries are excluded from the gradient.
-        '''
-
-        G = self._get_masked(X - self.Y_)
-
-        if self.model_ in ('nnm', 'nnm-sparse'):
-            if self.weight_mask_ is None:
-                gx = G
+ 
+    def _make_objective(self, Y, r, mask, weight, L_inv, Sigma_inv):
+        """
+        Construct and return the objective instance for the requested model.
+ 
+        For 'nnm-sparse', r may be a (r_nuc, l1_multiplier) tuple or a
+        scalar (l1_multiplier defaults to 1.0).
+        """
+        if self.model_ == 'nnm':
+            return NNMObjective(Y, r, mask = mask, weight = weight)
+ 
+        elif self.model_ == 'nnm-sparse':
+            if isinstance(r, tuple):
+                r_nuc, l1_mult = r
             else:
-                gx = np.square(self.weight_mask_) * G
-
+                r_nuc, l1_mult = r, 1.0
+            return NNMSparseObjective(
+                Y, r_nuc, l1_mult,
+                mask = mask, weight = weight,
+                simplex_method = self.simplex_method_,
+            )
+ 
         elif self.model_ == 'nnm-corr':
-            if self.weight_mask_ is None:
-                gx = self.Sigma_inv_ @ G
-            else:
-                gx = self.L_inv_.T @ (np.square(self.weight_mask_) * (self.L_inv_ @ G))
-            gx = self._get_masked(gx)
-
-        return gx
-
-
-    def _fw_step_size(self, dg, D):
-        '''
-        Step size from the line search
-        dg is the duality gap
-        D = X - S is the descent direction
-        Masked entries cannot affect the step size, 
-        because they are ignored in the objective.
-        Duality gap already ignores the masked entries by definition.
-        '''
-
-        Dm = self._get_masked(D)
-
-        if self.model_ in ('nnm', 'nnm-sparse'):
-            Qt = Dm
-            if self.weight_mask_ is not None:
-                Qt = self.weight_mask_ * Qt
-
-        elif self.model_ == 'nnm-corr':
-            Qt = self.L_inv_ @ Dm
-            if self.weight_mask_ is not None:
-                Qt = self.weight_mask_ * Qt
-
-        denom = np.linalg.norm(Qt, 'fro')**2
-
-        ss = dg / denom
-        ss = min(ss, 1.0)
-        if ss < 0:
-            self.logger_.warn(f"Step Size is less than 0 ({ss:g}). Using last valid step size.")
-            ss = self.st_list_[-1]
-        return ss
-
-
-    # ------------------------------------------------------------------
-    # Helper utilities
-    # ------------------------------------------------------------------
-
-    def _get_masked(self, X):
-        if self.mask_ is None or X is None:
-            return X
+            return NNMCorrObjective(
+                Y, r, L_inv, Sigma_inv,
+                mask = mask, weight = weight,
+            )
+ 
         else:
-            return X * ~self.mask_
+            raise ValueError(
+                f"Unknown model '{self.model_}'. "
+                "Choose from 'nnm', 'nnm-sparse', 'nnm-corr'."
+            )
+ 
+ 
+    # ------------------------------------------------------------------
+    # SVD budget
+    # ------------------------------------------------------------------
+ 
+    def _get_svd_max_iter(self, svd_max_iter):
+        """
+        Resolve the SVD iteration budget for the current call.
+ 
+        Priority: explicit argument > class-level setting > adaptive schedule.
+        The adaptive schedule grows slowly with iteration count.
+        """
+        if svd_max_iter is not None:
+            return svd_max_iter
+        if self.svd_max_iter_ is not None:
+            return self.svd_max_iter_
+        adaptive = 10 + int(self.iter_num_ / 20)
+        return min(adaptive, 100)
 
 
-    def _linopt_oracle_l1norm(self, X):
+    # ------------------------------------------------------------------
+    # Oracles + duality gap computation
+    # ------------------------------------------------------------------
+
+    def _oracle_l1norm(self, G):
         '''
         Linear optimization oracle,
         where the feasible region is a l1 norm ball for some r
         '''
-        idx = np.unravel_index(np.argmax(np.abs(X)), X.shape)
-        S = np.zeros_like(X)
-        sgn = np.sign(X[idx])
+        idx = np.unravel_index(np.argmax(np.abs(G)), G.shape)
+        S = np.zeros_like(G)
+        sgn = np.sign(G[idx])
         if sgn != 0:
-            S[idx] = - self.l1_thres_ * sgn
+            S[idx] = - self.obj_.l1_threshold_ * sgn
         return S
 
 
-    def _linopt_oracle_nucnorm(self, X, warm_start_uv = False, svd_max_iter = None):
-        '''
-        Linear optimization oracle,
-        where the feasible region is a nuclear norm ball for some r
-        '''
-        U1, V1_T = self._get_singular_vectors(X, warm_start = warm_start_uv, max_iter = svd_max_iter)
-        S = - self.rank_ * U1 @ V1_T
-        return S
-
-
-    def _get_singular_vectors(self, X, warm_start = False, max_iter = None):
-        if max_iter is None:
-            max_iter = self.svd_max_iter_
-
-        if max_iter is None:
-            nstep = len(self.st_list_) + 1
-            max_iter = 10 + int(nstep / 20)
-            max_iter = min(max_iter, 100)
-
-        svd = TopCompSVD(method = self.svd_method_, max_iter = max_iter)
-        if warm_start and self.svd_method_ == 'power':
-            svd.fit(X, u0 = self.svd_u_prev_, v0 = self.svd_vt_prev_)
-        else:
-            svd.fit(X)
-
-        self.logger_.debug(f"SVD: Max iter = {max_iter}, performed iter = {svd.n_iter}")
-        if self.svd_u_prev_ is not None and self.svd_vt_prev_ is not None:
-            self.logger_.debug(
-                f"     u1 norm change = {np.linalg.norm(svd.u1 - self.svd_u_prev_):g}, "
-                f"v1t norm change = {np.linalg.norm(svd.v1_t - self.svd_vt_prev_):g}"
-            )
-
-        self.svd_u_prev_ = svd.u1
-        self.svd_vt_prev_ = svd.v1_t
-        self.svd_n_iter_ = svd.n_iter
-
-        return svd.u1, svd.v1_t
-
-
-    def _proj_l1ball(self, X):
-        n, p = X.shape
-        xflat = X.flatten()
-        eucp = EuclideanProjection(method = self.simplex_method_, target = 'l1')
-        eucp.fit(xflat, a = self.l1_thres_)
-        return eucp.proj.reshape(n, p)
-
-
-    # ------------------------------------------------------------------
-    # Linear oracle + duality-gap computation per model
-    # ------------------------------------------------------------------
- 
     def _oracle_nnm(self, G, X, warm_start_uv = False, svd_max_iter = None):
         '''
         Compute the FW linear oracle, descent direction D, and duality gap
@@ -355,8 +264,29 @@ class FrankWolfe():
         D : np.ndarray  - descent direction  (X - S)
         dg : float      - duality gap
         '''
-        S = self._linopt_oracle_nucnorm(G, warm_start_uv = warm_start_uv,
-                                            svd_max_iter  = svd_max_iter)
+
+        max_iter = self._get_svd_max_iter(svd_max_iter)
+
+        S, u1, v1_t, n_iter = nuclear_norm_oracle(
+            G, self.obj_.r_,
+            method = self.svd_method_,
+            max_iter = max_iter,
+            warm_start = warm_start_uv,
+            u0 = self.svd_u_prev_, 
+            v0 = self.svd_vt_prev_
+        )
+
+        self.logger_.debug(f"SVD: max_iter = {max_iter}, performed = {n_iter}")
+        if self.svd_u_prev_ is not None:
+            self.logger_.debug(
+                f"     u1 norm change = {np.linalg.norm(u1 - self.svd_u_prev_):g}, "
+                f"v1t norm change = {np.linalg.norm(v1_t - self.svd_vt_prev_):g}"
+            )
+
+        self.svd_u_prev_ = u1
+        self.svd_vt_prev_ = v1_t
+        self.svd_n_iter_ = n_iter
+
         D  = X - S
         dg = np.sum(D * G)   # equivalent to trace(D.T @ G), avoids full matmul
         return S, D, dg
@@ -392,9 +322,11 @@ class FrankWolfe():
         DM : np.ndarray  - sparse descent direction    (M - SM)
         dg : float       - duality gap
         '''
-        SL = self._linopt_oracle_nucnorm(G, warm_start_uv = warm_start_uv,
-                                             svd_max_iter  = svd_max_iter)
-        SM = self._linopt_oracle_l1norm(G)
+
+        SL = self._oracle_nnm(G, X, 
+            warm_start_uv = warm_start_uv, 
+            svd_max_iter = svd_max_iter)[0]
+        SM = self._oracle_l1norm(G)
         DL = X - SL
         DM = M - SM
         dg = np.sum(DL * G) + np.sum(DM * G)
@@ -410,6 +342,10 @@ class FrankWolfe():
         Call ``oracle_fn(G, *args, warm_start_uv=False, svd_max_iter=...)``
         and, if the returned duality gap is negative, retry with progressively
         larger SVD iteration budgets (power method only).
+
+        A negative duality gap indicates inaccurate singular vectors.
+        Retrying with more power iterations (for method='power') typically
+        resolves the issue.
  
         ``oracle_fn`` must return a tuple whose **last element is dg**.
  
@@ -434,11 +370,11 @@ class FrankWolfe():
         if dg >= 0:
             return result
  
-        self.logger_.warn(f"Iteration {self.iter_num_}. Duality gap is less than 0 ({dg:g}).")
+        self.logger_.warn(f"Iteration {self.iter_num_}. Duality gap < 0 ({dg:g}).")
         if self.svd_method_ != 'power':
             return result
  
-        self.logger_.warn("Maybe power iteration didn't converge? Retrying SVD power iteration.")
+        self.logger_.warn("Retrying SVD power iteration with larger budget.")
         svd_max_iter = self.svd_max_iter_ * 2 if self.svd_max_iter_ is not None else 100
         for n_rep in range(1, 6):
 
@@ -458,9 +394,39 @@ class FrankWolfe():
  
         if dg < 0:
             self.logger_.warn(
-                f"Power iteration failed to improve duality gap (dg = {dg:g}). Check manually."
+                f"Power iteration could not recover positive dg ({dg:g})."
             )
         return result
+
+    # ------------------------------------------------------------------
+    # Step size
+    # ------------------------------------------------------------------
+ 
+    def _compute_step_size(self, dg, D):
+        """
+        Exact line-search step size  gamma = dg / step_denom(D), clamped to [0, 1].
+ 
+        The denominator is model-specific and computed by the objective.
+ 
+        Parameters
+        ----------
+        dg : float
+            Duality gap (numerator of the line search).
+        D : np.ndarray
+            Descent direction.
+ 
+        Returns
+        -------
+        ss : float   step size in (0, 1].
+        """
+        denom = self.obj_.step_denom(D)
+        ss    = min(dg / denom, 1.0)
+        if ss < 0:
+            self.logger_.warn(
+                f"Step size < 0 ({ss:g}). Using last valid step size."
+            )
+            ss = self.st_list_[-1]
+        return ss
  
  
     # ------------------------------------------------------------------
@@ -470,11 +436,6 @@ class FrankWolfe():
     def _fw_one_step_nnm(self, X):
         '''
         Single Frank-Wolfe step for the 'nnm' and 'nnm-corr' models.
- 
-        Both models share the same update rule:
-            X_new = (1 - step) * X + step * S
-        The distinction between them lies only in _f_gradient and _fw_step_size,
-        which already branch on self.model_ internally.
  
         Parameters
         ----------
@@ -488,11 +449,11 @@ class FrankWolfe():
         step : float      - step size used
         '''
         # 1. Gradient
-        G = self._f_gradient(X)
+        G = self.obj_.gradient(X)
         # 2. Linear oracle + descent direction + duality gap (with negative-dg guard)
         S, D, dg = self._try_positive_dg(self._oracle_nnm, G, X)
         # 3. Step size
-        step = self._fw_step_size(dg, D)
+        step = self._compute_step_size(dg, D)
         # 4. Update:  X - step*(X - S) = (1-step)*X + step*S
         Xnew = X - step * D
         return Xnew, G, dg, step
@@ -516,18 +477,25 @@ class FrankWolfe():
         step : float      - step size used
         '''
         # 1. Gradient
-        G = self._f_gradient(X + M)
+        G = self.obj_.gradient(X + M)
         # 2. Linear oracles + descent directions + duality gap (with negative-dg guard)
         SL, SM, DL, DM, dg = self._try_positive_dg(self._oracle_nnm_sparse, G, X, M)
         # 3. Step size (uses combined descent direction)
-        step = self._fw_step_size(dg, DL + DM)
+        step = self._compute_step_size(dg, DL + DM)
         # 4. Update low-rank and sparse components
         Xnew = X - step * DL
         Mnew = M - step * DM
         # 5. l1-ball projection half-step on M
-        G_half = self._f_gradient(Xnew + Mnew)
+        G_half = self.obj_.gradient(Xnew + Mnew)
         Mnew = self._proj_l1ball(Mnew - G_half)
         return Xnew, Mnew, G, dg, step
+
+
+    def _proj_l1ball(self, X):
+        n, p = X.shape
+        ep = EuclideanProjection(method = self.simplex_method_, target = 'l1')
+        ep.fit(X.ravel(), a = self.obj_.l1_threshold_)
+        return ep.proj.reshape(n, p)
 
 
     # ------------------------------------------------------------------
@@ -588,7 +556,7 @@ class FrankWolfe():
     # Public interface
     # ------------------------------------------------------------------
     def fit(self, Y, r, 
-            weight = None, mask = None, X0 = None, Ytrue = None,
+            weight = None, mask = None, X0 = None,
             L_inv = None, Sigma_inv = None):
 
         '''
@@ -598,35 +566,39 @@ class FrankWolfe():
         Parameters
         ----------
         Y : np.ndarray [size (n, p); dtype: float]
-            Input data matrix with n rows and p columns. May have missing values as np.nan.
+            Input data matrix. May have missing values as np.nan.
 
         r : float [if model = 'nnm'] or tuple(float, float) [if model = 'nnm-sparse']
-            Input constraint for the FW algorithm. If the model is 'nnm', the constraint 
-            is the threshold nuclear norm of the matrix. If the model is 'nnm-sparse', 
-            the constraint is a tuple of two elements -- the first element is the threshold 
-            nuclear norm and the second element is the threshold l_1 norm of the matrix.
+            Nuclear norm constraint radius. For 'nnm-sparse', a tuple 
+            (r_nuc, l1_multiplier) may be passed, where the second element
+            is a multiplier to determine the threshold l1 norm.
+            l1_multiplier defaults to 1.0 when r is scalar.
 
-        weight : (optional) np.ndarray [size (n, p): dtype: float], default=None
+        weight : (optional) np.ndarray [size (n, p); dtype: float], default=None
             An array of weights for each element in the input matrix Y.
 
         mask : (optional) np.ndarray [size (n, p); dtype: boolean], default=None
             An array of masks to hide specific elements in the input matrix Y.
-            To design the mask array, use 'True' for hiding / masking the element 
-            and 'False' for using the element in calculations.
+            True for entries to exclude. Internally, it is combined with 
+            all NaN entries.
 
         X0 : (optional) np.ndarray [size (n, p); dtype: float], default=None
             Optional initial guess for the low rank matrix in the FW algorithm. 
-            If set to None, the optimization is initiated from a matrix of zeros.
+            Defaults to zeros.
 
-        Ytrue : (optional) np.ndarray [size (n, p); dtype: float], default=None
-            Optional 'ground truth' for the input data matrix. This can be used
-            for benchmarking, where the error statistic (see utils.model_error)
-            is calculated between the estimated matrices (X, M and X+M) and Ytrue.
-            If set to None, then `Ytrue` is assumed equal to `Y`.
+        L_inv : np.ndarray [size (n, n); dtype: float], default=None
+            Inverse Cholesky factor of the sampling covariance A.
+            Required for model='nnm-corr'.
+ 
+        Sigma_inv : np.ndarray [size (n, n); dtype: float], default=None
+            Inverse of the sampling covariance matrix A = L L^T.
+            Required for model='nnm-corr'.
+
 
         Note
         ----
-        Any NaN value in the input matrix is added to `mask`.
+        Any NaN value in the input matrix is automatically added to `mask`.
+
 
         Usage
         -----
@@ -634,98 +606,52 @@ class FrankWolfe():
             model.fit(Y, r, ...)
         '''
 
-        # ---------------------
-        # Initialize data
-        # ---------------------
-
         self.logger_.debug(f"Model = {self.model_}")
         self.logger_.debug(f"Shape of input data = {Y.shape}")
 
-        n, p = Y.shape
+        # ------------------------------------------------------------------
+        # Build objective
+        # ------------------------------------------------------------------
+        self.obj_ = self._make_objective(Y, r, mask, weight, L_inv, Sigma_inv)
 
-        # Set class attributes
-        # to avoid nan values, set nan to zero for calculation.
-        # but remember the indices of nan values.
-        nan_mask = np.isnan(Y) # the input may contain NaN entries
-        self.Y_ = np.nan_to_num(Y, copy = True, nan = 0.0)
-        # Combine the NaN mask and the input mask, if provided.
-        # Prefer to keep it None if there is no mask for slightly faster calculations.
-        input_mask = np.zeros((n, p), dtype=bool) if mask is None else mask
-        self.mask_ = np.logical_or(nan_mask, input_mask)
-        if not np.any(self.mask_): 
-            self.mask_ = None
-        else:
-            self.logger_.debug(f"Using mask on {np.sum(self.mask_)} entries.")
+        self.logger_.debug(
+            f"Masked entries = {np.sum(self.obj_.mask_) if self.obj_.mask_ is not None else 0}"
+        )
 
-        if self.model_ == 'nnm-corr':
-            if L_inv is None or Sigma_inv is None:
-                raise ValueError("For model='nnm-corr', both L_inv and Sigma_inv must be provided.")
-            self.L_inv_ = L_inv
-            self.Sigma_inv_ = Sigma_inv
-
-        self.weight_ = weight
-        self.weight_mask_ = self._get_masked(self.weight_)
-
-        if self.weight_ is not None:
-            self.logger_.debug(f"Using input weights on input data.")
-        else:
-            self.logger_.debug(f"No input weights provided.")
-
-
-        # ---------------------
-        # Initialize constraints
-        # ---------------------
-
-        if self.model_ in ('nnm', 'nnm-corr'):
-            self.rank_ = r
-        elif self.model_ == 'nnm-sparse':
-            if isinstance(r, tuple):
-                self.rank_, self.l1_thres_ = r
-            else:
-                self.rank_ = r
-                self.l1_thres_ = 1.0
-            self.l1_thres_ *= np.linalg.norm(self.Y_, ord = 1) / np.sqrt(np.max(self.Y_.shape))
-
-        # ---------------------
-        # Initialize state
-        # ---------------------
-        X = np.zeros_like(Y) if X0 is None else X0.copy()
+        # Compatibility attributes for external inspection and tests
+        self.Y_    = self.obj_.Y_
+        self.mask_ = self.obj_.mask_
+        self.rank_ = self.obj_.r_
         if self.model_ == 'nnm-sparse':
-            M = np.zeros_like(Y)
+            self.l1_thres_ = self.obj_.l1_threshold_
+        if self.model_ == 'nnm-corr':
+            self.L_inv_     = self.obj_.L_inv_
+            self.Sigma_inv_ = self.obj_.Sigma_inv_
+
+        # ---------------------
+        # Initialize iterates
+        # ---------------------
+        X = np.zeros_like(self.obj_.Y_) if X0 is None else X0.copy()
+        if self.model_ == 'nnm-sparse':
+            M = np.zeros_like(self.obj_.Y_)
 
         # ---------------------
         # Initialize history
         # ---------------------
         dg = np.inf
         step = 1.0
-        fx = self._f_objective(X)
+        fx = self.obj_.value(X)
 
-        self.fx_list_ = [fx]
-        self.dg_list_ = [dg]
-        self.st_list_ = [step]
+        self.fx_list_  = [fx]
+        self.dg_list_  = [dg]
+        self.st_list_  = [step]
         self.cpu_time_ = [1e-8] # do not use 0 to avoid log10 error.
         self.iter_num_ = 0
+        self.convergence_msg_ = "Maximum number of iterations reached."
 
         if self.model_ == 'nnm-sparse':
-            fm = self._f_objective(M)
-            fl = fx
-            self.fm_list_ = [fm]
-            self.fl_list_ = [fl]
-
-        # ---------------------
-        # Initialize benchmark
-        # ---------------------
-        if self.is_benchmark_:
-            if Ytrue is None:
-                self.logger_.warn("True input not provided. Using observed input matrix for RMSE calculation.")
-                Ytrue = self.Y_.copy()
-            assert Ytrue.shape == Y.shape
-            if self.model_ in ('nnm', 'nnm-corr'):
-                self.rmse_ = [merr.get(Ytrue, X, method = self.benchmark_method_)]
-            elif self.model_ == 'nnm-sparse':
-                self.rmse_          = [merr.get(Ytrue, X + M, method = self.benchmark_method_)]
-                self.rmse_low_rank_ = [merr.get(Ytrue, X,     method = self.benchmark_method_)]
-                self.rmse_sparse_   = [merr.get(Ytrue, M,     method = self.benchmark_method_)]
+            self.fm_list_ = [self.obj_.value(M)]
+            self.fl_list_ = [fx]
 
         cpu_time_old = time.process_time()
 
@@ -739,13 +665,13 @@ class FrankWolfe():
 
             if self.model_ in ('nnm', 'nnm-corr'):
                 X, G, dg, step = self._fw_one_step_nnm(X)
-                fx = self._f_objective(X)
+                fx = self.obj_.value(X)
 
             elif self.model_ == 'nnm-sparse':
                 X, M, G, dg, step = self._fw_one_step_nnm_sparse(X, M)
-                fx = self._f_objective(X + M)
-                fm = self._f_objective(M)
-                fl = self._f_objective(X)
+                fx = self.obj_.value(X + M)
+                fm = self.obj_.value(M)
+                fl = self.obj_.value(X)
 
             self.logger_.debug(f"Step size {step:.3f}. Duality Gap {dg:g}.")
 
@@ -760,15 +686,6 @@ class FrankWolfe():
             if self.model_ == 'nnm-sparse':
                 self.fm_list_.append(fm)
                 self.fl_list_.append(fl)
-
-            # Append benchmark
-            if self.is_benchmark_:
-                if self.model_ in ('nnm', 'nnm-corr'):
-                    self.rmse_.append(merr.get(Ytrue, X, method = self.benchmark_method_))
-                elif self.model_ == 'nnm-sparse':
-                    self.rmse_.append(merr.get(Ytrue, X + M, method = self.benchmark_method_))
-                    self.rmse_low_rank_.append(merr.get(Ytrue, X, method = self.benchmark_method_))
-                    self.rmse_sparse_.append(merr.get(Ytrue, M, method = self.benchmark_method_))
 
             # The logger would not print anything if logging level is higher than INFO.
             # The outer if loop reduces some workload of the logger class.
@@ -787,7 +704,9 @@ class FrankWolfe():
                 self.convergence_msg_ = f"Maxinum number of iterations reached."
 
 
-        self.logger_.info(f"Stopping at iteration {self.iter_num_}. Step size {step:.3f}. Duality Gap {dg:g}")
+        self.logger_.info(
+            f"Stopping at iteration {self.iter_num_}. "
+            f"Step size {step:.3f}. Duality Gap {dg:g}")
         self.logger_.info(self.convergence_msg_)
         self.X_ = X
         if self.model_ == 'nnm-sparse': 

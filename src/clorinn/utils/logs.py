@@ -41,6 +41,9 @@ class CustomLogger(logging.getLoggerClass()):
 
     def __init__(self, name, fmt = None, level = None, logfile = None, is_handler = False, is_debug = False):
         # Make sure the project has a root logger
+        # after introducing _setup_root_logger(),
+        # this is now dead code as the first condition is always False.
+        # retained as a safety fallback in case loggers is ever cleared externally.
         if project.get_name() not in loggers.keys() and not name == project.get_name():
             self.create_default_logger()
         # Create the logger
@@ -134,3 +137,20 @@ class CustomLogger(logging.getLoggerClass()):
         #else:
         #    self.logger.debug(f"Using old {self.logger}")
         return
+
+def _setup_root_logger():
+    """
+    Initialise the root logger at import time so that module-level
+    loggers (logging.getLogger(__name__)) have a handler available
+    regardless of whether any class has been instantiated yet.
+    """
+    name = project.get_name()
+    if name not in loggers:
+        formatter = get_new_formatter(project.logging_format())
+        handler   = get_new_handler(formatter, project.logging_file())
+        logger    = logging.getLogger(name)
+        logger.setLevel(project.logging_level())
+        logger.addHandler(handler)
+        loggers[name] = logger
+
+_setup_root_logger()
