@@ -44,7 +44,7 @@ class EuclideanProjection():
     def fit(self, y, a = 1.0):
         #
         if self.target_ == 'simplex':
-            assert np.alltrue(y >= 0)
+            assert np.all(y >= 0)
             ypos = y
         elif self.target_ == 'l1':
             ypos = np.abs(y)
