@@ -11,7 +11,7 @@ when you deliberately modify solver behavior.
 # FrankWolfe kwargs shared by all FW fixtures (model is set per-fixture)
 FW_CONFIG = dict(
     max_iter=2000,
-    svd_method='left-gram',
+    svd_method='direct',
     stop_criteria=['duality_gap', 'step_size', 'relative_loss', 'relative_dg'],
     tol=1e-4,
     step_tol=1e-4,

@@ -235,7 +235,7 @@ class FrankWolfe():
         ----------
         G : np.ndarray
             Current gradient.
-        X : np.ndarray
+        iter_state: IterState
             Current iterate.
         warm_start_uv : bool
             Whether to warm-start the SVD power iteration.
@@ -289,10 +289,8 @@ class FrankWolfe():
         ----------
         G : np.ndarray
             Current gradient.
-        X : np.ndarray
-            Current low-rank iterate.
-        M : np.ndarray
-            Current sparse iterate.
+        iter_state: IterState
+            Current iterate.
         warm_start_uv : bool
             Whether to warm-start the SVD power iteration.
         svd_max_iter : int or None
@@ -302,7 +300,7 @@ class FrankWolfe():
         -------
         SL : np.ndarray  - nuclear-norm oracle output
         SM : np.ndarray  - l1-norm oracle output
-        D_L : np.ndarray  - low-rank descent direction  (X - SL)
+        DL : np.ndarray  - low-rank descent direction  (X - SL)
         DM : np.ndarray  - sparse descent direction    (M - SM)
         dg : float       - duality gap
         '''
@@ -340,8 +338,8 @@ class FrankWolfe():
             One of ``_oracle_nnm`` or ``_oracle_nnm_sparse``.
         G : np.ndarray
             Current gradient passed as the first positional argument to oracle_fn.
-        *args
-            Additional positional arguments forwarded to oracle_fn (e.g. X, M).
+        iter_state : IterState
+            Current state of the iteration, forwarded to oracle_fn.
  
         Returns
         -------
@@ -401,6 +399,8 @@ class FrankWolfe():
             Duality gap (numerator of the line search).
         D : np.ndarray
             Descent direction.
+        iter_state: IterState
+            Required for last step size.
  
         Returns
         -------
@@ -430,10 +430,13 @@ class FrankWolfe():
         Parameters
         ----------
         X : np.ndarray - current iterate.
+
+        Updates
+        -------
+        iter_state : IterState
  
         Returns
         -------
-        Xnew : np.ndarray
         G    : np.ndarray - gradient at X
         dg   : float      - duality gap
         step : float      - step size used
@@ -459,34 +462,39 @@ class FrankWolfe():
         X : np.ndarray - current low-rank iterate.
         M : np.ndarray - current sparse iterate.
  
+        Updates
+        -------
+        iter_state : IterState
+ 
         Returns
         -------
-        Xnew : np.ndarray
-        Mnew : np.ndarray
         G    : np.ndarray - gradient at X + M
         dg   : float      - duality gap
         step : float      - step size used
         '''
-        # 1. Gradient
         G = self.obj_.gradient(iter_state.X + iter_state.M)
-        # 2. Linear oracles + descent directions + duality gap (with negative-dg guard)
         SL, SM, DL, DM, dg = self._try_positive_dg(self._oracle_nnm_sparse, G, iter_state = iter_state)
-        # 3. Step size (uses combined descent direction)
-        step_size = self._compute_step_size(dg, DL + DM, iter_state)
-        # 4. Update low-rank and sparse components
+
+        # v1.0
+        #step_size    = self._compute_step_size(dg, DL, iter_state)
+        #iter_state.X = iter_state.X - step_size * DL
+        #Mnew         = iter_state.M - step_size * DM
+        #G_half       = self.obj_.gradient(iter_state.X + Mnew)
+        #iter_state.M = self._proj_l1ball(Mnew - G_half)
+
+        # v2.0
+        step_size = self._compute_step_size(np.sum(DL * G), DL, iter_state)
         iter_state.X = iter_state.X - step_size * DL
-        Mnew         = iter_state.M - step_size * DM
-        # 5. l1-ball projection half-step on M
-        G_half       = self.obj_.gradient(iter_state.X + Mnew)
-        iter_state.M = self._proj_l1ball(Mnew - G_half)
+        iter_state.M = self.obj_.project_sparse(iter_state.X)
+
         return G, dg, step_size
 
 
-    def _proj_l1ball(self, X):
-        n, p = X.shape
-        ep = EuclideanProjection(method = self.cfg_.simplex_method, target = 'l1')
-        ep.fit(X.ravel(), a = self.obj_.l1_threshold_)
-        return ep.proj.reshape(n, p)
+    #def _proj_l1ball(self, X):
+    #    n, p = X.shape
+    #    ep = EuclideanProjection(method = self.cfg_.simplex_method, target = 'l1')
+    #    ep.fit(self.obj_._masked(X).ravel(), a = self.obj_.l1_threshold_)
+    #    return ep.proj.reshape(n, p)
 
 
     # ------------------------------------------------------------------
@@ -615,7 +623,8 @@ class FrankWolfe():
         # Initialize iterates
         # ---------------------
         X = np.zeros_like(self.obj_.Y_) if X0 is None else X0.copy()
-        M = np.zeros_like(self.obj_.Y_) if self.model_ == 'nnm-sparse' else None
+        #M = np.zeros_like(self.obj_.Y_) if self.model_ == 'nnm-sparse' else None
+        M = self.obj_.project_sparse(X) if self.model_ == 'nnm-sparse' else None
         iter_state = IterState(X=X, M=M)
 
         # ---------------------
@@ -704,7 +713,8 @@ class FrankWolfe():
             message     = iter_state.stop_reason.message,
             metrics     = {
                 'nuclear_norm': float(np.linalg.norm(iter_state.X, 'nuc')),
-                'l1_norm': float(np.linalg.norm(iter_state.M, 1)) if self.model_ == 'nnm-sparse' else None,
+                #'l1_norm': float(np.linalg.norm(iter_state.M, 1)) if self.model_ == 'nnm-sparse' else None,
+                'l1_norm': float(np.sum(np.abs(iter_state.M))) if self.model_ == 'nnm-sparse' else None,
                 'radius' : radius,
                 'sparse_scale' : sparse_scale,
                 'l1_threshold' : self.obj_.l1_threshold_ if self.model_ == 'nnm-sparse' else None,

@@ -51,6 +51,8 @@ class _FWRegressionBase(unittest.TestCase):
     """
     fixture_name: str = ''
     model: str = ''
+    rtol: float = 1e-12
+    atol: float = 1e-12
 
     @classmethod
     def setUpClass(cls):
@@ -79,19 +81,19 @@ class _FWRegressionBase(unittest.TestCase):
 
     def test_X_identical(self):
         #np.testing.assert_array_equal(self.m.X, self.f['X'])
-        np.testing.assert_allclose(self.m.X, self.f['X'], rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(self.m.X, self.f['X'], rtol=self.rtol, atol=self.atol)
 
     def test_fx_history_identical(self):
         #np.testing.assert_array_equal(np.array(self.m.history.loss), self.f['fx'])
-        np.testing.assert_allclose(np.array(self.m.history.loss), self.f['fx'], rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(np.array(self.m.history.loss), self.f['fx'], rtol=self.rtol, atol=self.atol)
 
     def test_dg_history_identical(self):
         #np.testing.assert_array_equal(np.array(self.m.history.duality_gap), self.f['dg'])
-        np.testing.assert_allclose(np.array(self.m.history.duality_gap), self.f['dg'], rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(np.array(self.m.history.duality_gap), self.f['dg'], rtol=self.rtol, atol=self.atol)
 
     def test_steps_history_identical(self):
         #np.testing.assert_array_equal(np.array(self.m.history.step_size), self.f['steps'])
-        np.testing.assert_allclose(np.array(self.m.history.step_size), self.f['steps'], rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(np.array(self.m.history.step_size), self.f['steps'], rtol=self.rtol, atol=self.atol)
 
     def test_history_length(self):
         """All histories have length n_iter + 1 (iteration 0 is included)."""
@@ -104,7 +106,7 @@ class _FWRegressionBase(unittest.TestCase):
         if 'M' not in self.f:
             self.skipTest("not a sparse fixture")
         #np.testing.assert_array_equal(self.m.M, self.f['M'])
-        np.testing.assert_allclose(self.m.M, self.f['M'], rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(self.m.M, self.f['M'], rtol=self.rtol, atol=self.atol)
 
     def test_M_absent_for_non_sparse(self):
         if 'M' in self.f:
@@ -160,6 +162,8 @@ class TestRegressionNNMCorrMask(_FWRegressionBase):
 
 class _PGDRegressionBase(unittest.TestCase):
     fixture_name: str = ''
+    rtol: float = 1e-12
+    atol: float = 1e-12
 
     @classmethod
     def setUpClass(cls):
@@ -181,11 +185,11 @@ class _PGDRegressionBase(unittest.TestCase):
 
     def test_X_identical(self):
         #np.testing.assert_array_equal(self.pgd.X, self.f['X'])
-        np.testing.assert_allclose(self.pgd.X, self.f['X'], rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(self.pgd.X, self.f['X'], rtol=self.rtol, atol=self.atol)
 
     def test_fx_history_identical(self):
         #np.testing.assert_array_equal(np.array(self.pgd.history.loss), self.f['fx'])
-        np.testing.assert_allclose(np.array(self.pgd.history.loss), self.f['fx'], rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(np.array(self.pgd.history.loss), self.f['fx'], rtol=self.rtol, atol=self.atol)
 
     def test_converged_in_interior(self):
         self.assertEqual(self.pgd.converged,

@@ -261,8 +261,8 @@ class NNMSparseObjective(NNMObjective):
         """
         Exact sparse-component update  M = P_{l1-ball}[ R ⊙ (Z - X) ].
 
-        Unique minimiser of f(X, M) over the l1 ball for fixed X
-        (Appendix B of [1]).  Missing entries of M are zero.
+        Unique minimiser of f(X, M) over the l1 ball for fixed X.
+        Missing entries of M are zero.
         """
         n, p = self.Y_.shape
         B = self._masked(self.Y_ - X)
