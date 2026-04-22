@@ -410,11 +410,14 @@ class FrankWolfe():
         ss : float   step size in (0, 1].
         """
         denom = self.obj_.step_denom(D)
+
+        if not np.isfinite(denom) or denom == 0.0:
+            self.logger_.warn(f"Step size denominator is {denom:g} at iteration {iter_state.istep}. Returning zero step.")
+            return 0.0
+
         ss    = min(dg / denom, 1.0)
         if ss < 0:
-            self.logger_.warn(
-                f"Step size < 0 ({ss:g}). Using last valid step size."
-            )
+            self.logger_.warn(f"Step size < 0 ({ss:g}). Using last valid step size.")
             ss = iter_state.last_step_size
         return ss
  

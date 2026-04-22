@@ -13,7 +13,6 @@ class History:
     # sparse-only; None for nnm / nnm-corr
     loss_sparse  : list | None = None
     loss_low_rank: list | None = None
-    l1_norm      : list | None = None
 
 
 
