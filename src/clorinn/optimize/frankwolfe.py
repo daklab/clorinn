@@ -706,4 +706,4 @@ class FrankWolfe():
             },
         )
 
-        return
+        return self

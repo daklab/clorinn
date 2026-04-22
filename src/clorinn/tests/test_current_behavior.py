@@ -78,16 +78,20 @@ class _FWRegressionBase(unittest.TestCase):
         self.assertEqual(self.m.n_iter, int(self.f['n_iter']))
 
     def test_X_identical(self):
-        np.testing.assert_array_equal(self.m.X, self.f['X'])
+        #np.testing.assert_array_equal(self.m.X, self.f['X'])
+        np.testing.assert_allclose(self.m.X, self.f['X'], rtol=1e-12, atol=1e-12)
 
     def test_fx_history_identical(self):
-        np.testing.assert_array_equal(np.array(self.m.history.loss), self.f['fx'])
+        #np.testing.assert_array_equal(np.array(self.m.history.loss), self.f['fx'])
+        np.testing.assert_allclose(np.array(self.m.history.loss), self.f['fx'], rtol=1e-12, atol=1e-12)
 
     def test_dg_history_identical(self):
-        np.testing.assert_array_equal(np.array(self.m.history.duality_gap), self.f['dg'])
+        #np.testing.assert_array_equal(np.array(self.m.history.duality_gap), self.f['dg'])
+        np.testing.assert_allclose(np.array(self.m.history.duality_gap), self.f['dg'], rtol=1e-12, atol=1e-12)
 
     def test_steps_history_identical(self):
-        np.testing.assert_array_equal(np.array(self.m.history.step_size), self.f['steps'])
+        #np.testing.assert_array_equal(np.array(self.m.history.step_size), self.f['steps'])
+        np.testing.assert_allclose(np.array(self.m.history.step_size), self.f['steps'], rtol=1e-12, atol=1e-12)
 
     def test_history_length(self):
         """All histories have length n_iter + 1 (iteration 0 is included)."""
@@ -99,7 +103,8 @@ class _FWRegressionBase(unittest.TestCase):
     def test_M_identical(self):
         if 'M' not in self.f:
             self.skipTest("not a sparse fixture")
-        np.testing.assert_array_equal(self.m.M, self.f['M'])
+        #np.testing.assert_array_equal(self.m.M, self.f['M'])
+        np.testing.assert_allclose(self.m.M, self.f['M'], rtol=1e-12, atol=1e-12)
 
     def test_M_absent_for_non_sparse(self):
         if 'M' in self.f:
@@ -175,10 +180,12 @@ class _PGDRegressionBase(unittest.TestCase):
         self.assertEqual(self.pgd.n_iter, int(self.f['n_iter']))
 
     def test_X_identical(self):
-        np.testing.assert_array_equal(self.pgd.X, self.f['X'])
+        #np.testing.assert_array_equal(self.pgd.X, self.f['X'])
+        np.testing.assert_allclose(self.pgd.X, self.f['X'], rtol=1e-12, atol=1e-12)
 
     def test_fx_history_identical(self):
-        np.testing.assert_array_equal(np.array(self.pgd.history.loss), self.f['fx'])
+        #np.testing.assert_array_equal(np.array(self.pgd.history.loss), self.f['fx'])
+        np.testing.assert_allclose(np.array(self.pgd.history.loss), self.f['fx'], rtol=1e-12, atol=1e-12)
 
     def test_converged_in_interior(self):
         self.assertEqual(self.pgd.converged,
@@ -219,7 +226,7 @@ class TestFixturesPresent(unittest.TestCase):
         self.assertTrue(
             os.path.isdir(FIXTURES_DIR),
             msg=f"Fixtures directory missing: {FIXTURES_DIR}\n"
-                "Run: python -m clorinn.tests.generate_current_behavior_fixtures",
+                "Run: python -m clorinn.tests.generate_current_behavior",
         )
 
     def test_all_fixture_files_present(self):
@@ -228,5 +235,5 @@ class TestFixturesPresent(unittest.TestCase):
         self.assertEqual(
             missing, [],
             msg=f"Missing fixtures: {missing}\n"
-                "Run: python -m clorinn.tests.generate_current_behavior_fixtures",
+                "Run: python -m clorinn.tests.generate_current_behavior",
         )

@@ -10,7 +10,7 @@ bit-for-bit identical results.
 Usage
 -----
     pip install -e . --no-build-isolation
-    python -m clorinn.tests.generate_current_behavior_fixtures
+    python -m clorinn.tests.generate_current_behavior
 
 Fixture files are written to src/clorinn/tests/fixtures/.
 
@@ -116,8 +116,8 @@ def gen_nnm(prob):
     _save(
         os.path.join(FIXTURES_DIR, 'nnm.npz'),
         Y=prob['Y'], r=np.float64(R_NUC),
-        X=m.X, fx=np.array(m.fx), dg=np.array(m.duality_gaps),
-        steps=np.array(m.steps), n_iter=np.int64(m.n_iter),
+        X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
+        steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
@@ -128,8 +128,8 @@ def gen_nnm_mask(prob):
     _save(
         os.path.join(FIXTURES_DIR, 'nnm_mask.npz'),
         Y=prob['Y'], r=np.float64(R_NUC), mask=prob['mask'],
-        X=m.X, fx=np.array(m.fx), dg=np.array(m.duality_gaps),
-        steps=np.array(m.steps), n_iter=np.int64(m.n_iter),
+        X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
+        steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
@@ -140,8 +140,8 @@ def gen_nnm_sparse(prob):
     _save(
         os.path.join(FIXTURES_DIR, 'nnm_sparse.npz'),
         Y=prob['Y'], r=np.float64(R_NUC), l1_multiplier=np.float64(L1_MULT),
-        X=m.X, M=m.M, fx=np.array(m.fx), dg=np.array(m.duality_gaps),
-        steps=np.array(m.steps), n_iter=np.int64(m.n_iter),
+        X=m.result.X, M=m.result.M, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
+        steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
@@ -153,8 +153,8 @@ def gen_nnm_sparse_mask(prob):
         os.path.join(FIXTURES_DIR, 'nnm_sparse_mask.npz'),
         Y=prob['Y'], r=np.float64(R_NUC), l1_multiplier=np.float64(L1_MULT),
         mask=prob['mask'],
-        X=m.X, M=m.M, fx=np.array(m.fx), dg=np.array(m.duality_gaps),
-        steps=np.array(m.steps), n_iter=np.int64(m.n_iter),
+        X=m.result.X, M=m.result.M, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
+        steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
@@ -166,8 +166,8 @@ def gen_nnm_corr(prob):
         os.path.join(FIXTURES_DIR, 'nnm_corr.npz'),
         Y=prob['Y'], r=np.float64(R_NUC),
         L_inv=prob['L_inv'], Sigma_inv=prob['Sigma_inv'],
-        X=m.X, fx=np.array(m.fx), dg=np.array(m.duality_gaps),
-        steps=np.array(m.steps), n_iter=np.int64(m.n_iter),
+        X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
+        steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
@@ -180,8 +180,8 @@ def gen_nnm_corr_mask(prob):
         os.path.join(FIXTURES_DIR, 'nnm_corr_mask.npz'),
         Y=prob['Y'], r=np.float64(R_NUC), mask=prob['mask'],
         L_inv=prob['L_inv'], Sigma_inv=prob['Sigma_inv'],
-        X=m.X, fx=np.array(m.fx), dg=np.array(m.duality_gaps),
-        steps=np.array(m.steps), n_iter=np.int64(m.n_iter),
+        X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
+        steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
@@ -192,9 +192,9 @@ def gen_pgd(prob):
     _save(
         os.path.join(FIXTURES_DIR, 'pgd.npz'),
         Y=prob['Y'], r=np.float64(R_NUC),
-        X=pgd.X, fx=np.array(pgd.fx),
-        n_iter=np.int64(pgd.n_iter),
-        converged_in_interior=np.bool_(pgd.converged_in_interior),
+        X=pgd.result.X, fx=np.array(pgd.result.history.loss),
+        n_iter=np.int64(pgd.result.n_iter),
+        converged_in_interior=np.bool_(pgd.result.converged),
     )
 
 
@@ -205,9 +205,9 @@ def gen_pgd_mask(prob):
     _save(
         os.path.join(FIXTURES_DIR, 'pgd_mask.npz'),
         Y=prob['Y'], r=np.float64(R_NUC), mask=prob['mask'],
-        X=pgd.X, fx=np.array(pgd.fx),
-        n_iter=np.int64(pgd.n_iter),
-        converged_in_interior=np.bool_(pgd.converged_in_interior),
+        X=pgd.result.X, fx=np.array(pgd.result.history.loss),
+        n_iter=np.int64(pgd.result.n_iter),
+        converged_in_interior=np.bool_(pgd.result.converged),
     )
 
 

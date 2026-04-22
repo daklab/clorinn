@@ -2,7 +2,7 @@
 regression_config.py
 ---------------------
 Single source of truth for the solver configuration used in
-generate_current_behavior_fixtures.py and test_current_behavior_regression.py.
+generate_current_behavior.py and test_current_behavior.py.
 
 Changing anything here and re-running the generator is the intended workflow
 when you deliberately modify solver behavior.
