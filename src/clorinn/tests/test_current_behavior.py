@@ -62,14 +62,14 @@ class _FWRegressionBase(unittest.TestCase):
 
         m = FrankWolfe(model=cls.model, **FW_CONFIG)
 
-        fit_kwargs = dict(r=float(f['r']))
+        fit_kwargs = dict(radius=float(f['radius']))
         if 'mask' in f:
             fit_kwargs['mask'] = f['mask']
         if 'L_inv' in f:
             fit_kwargs['L_inv'] = f['L_inv']
             fit_kwargs['Sigma_inv'] = f['Sigma_inv']
-        if 'l1_multiplier' in f:
-            fit_kwargs['r'] = (float(f['r']), float(f['l1_multiplier']))
+        if 'sparse_scale' in f:
+            fit_kwargs['sparse_scale'] = float(f['sparse_scale'])
 
         m.fit(f['Y'], **fit_kwargs)
         cls.m = m.result
@@ -170,7 +170,7 @@ class _PGDRegressionBase(unittest.TestCase):
         cls.f = f
 
         pgd = PGDWarmStart(**PGD_CONFIG)
-        fit_kwargs = dict(r=float(f['r']))
+        fit_kwargs = dict(radius=float(f['radius']))
         if 'mask' in f:
             fit_kwargs['mask'] = f['mask']
         pgd.fit(f['Y'], **fit_kwargs)

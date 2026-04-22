@@ -83,11 +83,11 @@ class NNMObjective():
     mask_ : np.ndarray [size (n, p); dtype: bool] or None
         Combined observation mask.  None when all entries are observed.
 
-    r_ : float
+    radius_ : float
         Nuclear norm constraint radius.
     """
 
-    def __init__(self, Y, r, mask = None, weight = None):
+    def __init__(self, Y, radius, mask = None, weight = None):
         n, p = Y.shape
 
         # Replace NaN with 0 and record their positions.
@@ -99,14 +99,14 @@ class NNMObjective():
         combined    = np.logical_or(nan_mask, input_mask)
         self.mask_  = combined if np.any(combined) else None
 
-        self.r_ = r
+        self.radius_ = radius
 
         # Pre-apply mask to weights so that weight_mask_ is ready to use
         # directly in gradient and step_denom without re-masking each time.
         self.weight_mask_ = self._masked(weight)
 
         _logger.debug(
-            f"{self.__class__.__name__}: shape={Y.shape}, r={r}, "
+            f"{self.__class__.__name__}: shape={Y.shape}, radius={radius}, "
             f"masked_entries={np.sum(combined) if self.mask_ is not None else 0}, "
             f"weighted={'yes' if weight is not None else 'no'}"
         )
@@ -118,9 +118,9 @@ class NNMObjective():
     # ------------------------------------------------------------------
 
     @property
-    def r(self):
+    def radius(self):
         """Nuclear norm constraint radius."""
-        return self.r_
+        return self.radius_
 
 
     # ------------------------------------------------------------------
@@ -230,9 +230,9 @@ class NNMSparseObjective(NNMObjective):
         Scaled l1 constraint radius used by project_sparse.
     """
 
-    def __init__(self, Y, r, l1_multiplier,
+    def __init__(self, Y, radius, l1_multiplier,
                  mask = None, weight = None, simplex_method = 'sort'):
-        super().__init__(Y, r, mask = mask, weight = weight)
+        super().__init__(Y, radius, mask = mask, weight = weight)
         self.simplex_method_ = simplex_method
 
         # Scale the l1 multiplier by the data-dependent factor.
@@ -310,12 +310,12 @@ class NNMCorrObjective(NNMObjective):
     by the off-diagonal structure of A^{-1}.
     """
 
-    def __init__(self, Y, r, L_inv, Sigma_inv, mask = None, weight = None):
+    def __init__(self, Y, radius, L_inv, Sigma_inv, mask = None, weight = None):
         if L_inv is None or Sigma_inv is None:
             raise ValueError(
                 "NNMCorrObjective requires both L_inv and Sigma_inv."
             )
-        super().__init__(Y, r, mask = mask, weight = weight)
+        super().__init__(Y, radius, mask = mask, weight = weight)
 
         self.L_inv_     = L_inv
         self.Sigma_inv_ = Sigma_inv

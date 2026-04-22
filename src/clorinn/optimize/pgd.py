@@ -83,7 +83,7 @@ class PGDWarmStart():
         return self.result_
  
  
-    def fit(self, Y, r, mask = None, weight = None):
+    def fit(self, Y, radius, mask = None, weight = None):
         """
         Run PGD warm start.
  
@@ -92,7 +92,7 @@ class PGDWarmStart():
         Y : np.ndarray [size (n, p); dtype: float]
             Input data matrix (NaN values should already be replaced by 0).
  
-        r : float
+        radius : float
             Nuclear norm radius.
  
         mask : np.ndarray [size (n, p); dtype: bool] or None
@@ -106,7 +106,7 @@ class PGDWarmStart():
         self: PGDWarmStart
             Fitted instance. Access the result via properties.
         """
-        obj = NNMObjective(Y, r, mask = mask, weight = weight)
+        obj = NNMObjective(Y, radius, mask = mask, weight = weight)
         eta = obj.pgd_step_size
 
         projector = NuclearNormProjection(simplex_method = self.simplex_method_)
@@ -127,7 +127,7 @@ class PGDWarmStart():
             X_candidate = X - eta * G
 
             # Project onto nuclear norm ball
-            projector.fit(X_candidate, r)
+            projector.fit(X_candidate, radius)
             X = projector.proj
  
             if self.show_progress_:
@@ -157,7 +157,7 @@ class PGDWarmStart():
                         nuc = projector.nuclear_norm_after_
                         self.logger_.info(
                             f"PGD iter {n_iter:4d}  Converged in interior "
-                            f"(||X||_* = {nuc:.1f} < r = {r:.1f})"
+                            f"(||X||_* = {nuc:.1f} < r = {radius:.1f})"
                         )
                     stop_reason = StopReason.RELATIVE_LOSS
                     converged_interior = True
@@ -173,7 +173,8 @@ class PGDWarmStart():
             converged = converged_interior,
             message   = 'Converged in interior' if converged_interior else 'Max iterations',
             metrics   = {
-                'nuclear_norm': float(np.linalg.norm(X, 'nuc'))
+                'nuclear_norm': float(np.linalg.norm(X, 'nuc')),
+                'radius': radius,
                 },
         )
 

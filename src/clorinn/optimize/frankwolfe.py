@@ -156,7 +156,7 @@ class FrankWolfe():
     # Objective factory
     # ------------------------------------------------------------------
  
-    def _make_objective(self, Y, r, mask, weight, L_inv, Sigma_inv):
+    def _make_objective(self, Y, radius, sparse_scale, mask, weight, L_inv, Sigma_inv):
         """
         Construct and return the objective instance for the requested model.
  
@@ -164,22 +164,19 @@ class FrankWolfe():
         scalar (l1_multiplier defaults to 1.0).
         """
         if self.model_ == 'nnm':
-            return NNMObjective(Y, r, mask = mask, weight = weight)
+            return NNMObjective(Y, radius, mask = mask, weight = weight)
  
         elif self.model_ == 'nnm-sparse':
-            if isinstance(r, tuple):
-                r_nuc, l1_mult = r
-            else:
-                r_nuc, l1_mult = r, 1.0
+            l1_mult = 1.0 if sparse_scale is None else sparse_scale
             return NNMSparseObjective(
-                Y, r_nuc, l1_mult,
+                Y, radius, l1_mult,
                 mask = mask, weight = weight,
                 simplex_method = self.cfg_.simplex_method,
             )
  
         elif self.model_ == 'nnm-corr':
             return NNMCorrObjective(
-                Y, r, L_inv, Sigma_inv,
+                Y, radius, L_inv, Sigma_inv,
                 mask = mask, weight = weight,
             )
  
@@ -255,7 +252,7 @@ class FrankWolfe():
         max_iter = self._get_svd_max_iter(svd_max_iter, iter_state)
 
         S, u1, v1_t, n_iter = nuclear_norm_oracle(
-            G, self.obj_.r_,
+            G, self.obj_.radius_,
             method = self.cfg_.svd_method,
             max_iter = max_iter,
             warm_start = warm_start_uv,
@@ -549,7 +546,8 @@ class FrankWolfe():
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
-    def fit(self, Y, r, 
+    def fit(self, Y, radius,
+            sparse_scale = None,
             weight = None, mask = None, X0 = None,
             L_inv = None, Sigma_inv = None):
 
@@ -562,11 +560,12 @@ class FrankWolfe():
         Y : np.ndarray [size (n, p); dtype: float]
             Input data matrix. May have missing values as np.nan.
 
-        r : float [if model = 'nnm'] or tuple(float, float) [if model = 'nnm-sparse']
-            Nuclear norm constraint radius. For 'nnm-sparse', a tuple 
-            (r_nuc, l1_multiplier) may be passed, where the second element
-            is a multiplier to determine the threshold l1 norm.
-            l1_multiplier defaults to 1.0 when r is scalar.
+        radius : float
+            Nuclear norm constraint radius.
+
+        sparse_scale: float, default=1.0
+            Multiplier to determine the threshold sparse radius (constraint on 
+            l1 norm). Used for model='nnm-sparse'.
 
         weight : (optional) np.ndarray [size (n, p); dtype: float], default=None
             An array of weights for each element in the input matrix Y.
@@ -606,7 +605,7 @@ class FrankWolfe():
         # ---------------------
         # Build objective
         # ---------------------
-        self.obj_ = self._make_objective(Y, r, mask, weight, L_inv, Sigma_inv)
+        self.obj_ = self._make_objective(Y, radius, sparse_scale, mask, weight, L_inv, Sigma_inv)
 
         self.logger_.debug(
             f"Masked entries = {np.sum(self.obj_.mask_) if self.obj_.mask_ is not None else 0}"
@@ -706,6 +705,9 @@ class FrankWolfe():
             metrics     = {
                 'nuclear_norm': float(np.linalg.norm(iter_state.X, 'nuc')),
                 'l1_norm': float(np.linalg.norm(iter_state.M, 1)) if self.model_ == 'nnm-sparse' else None,
+                'radius' : radius,
+                'sparse_scale' : sparse_scale,
+                'l1_threshold' : self.obj_.l1_threshold_ if self.model_ == 'nnm-sparse' else None,
             },
         )
 
