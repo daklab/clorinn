@@ -72,7 +72,7 @@ class _FWRegressionBase(unittest.TestCase):
             fit_kwargs['r'] = (float(f['r']), float(f['l1_multiplier']))
 
         m.fit(f['Y'], **fit_kwargs)
-        cls.m = m
+        cls.m = m.result
 
     def test_n_iter(self):
         self.assertEqual(self.m.n_iter, int(self.f['n_iter']))
@@ -81,20 +81,20 @@ class _FWRegressionBase(unittest.TestCase):
         np.testing.assert_array_equal(self.m.X, self.f['X'])
 
     def test_fx_history_identical(self):
-        np.testing.assert_array_equal(np.array(self.m.fx), self.f['fx'])
+        np.testing.assert_array_equal(np.array(self.m.history.loss), self.f['fx'])
 
     def test_dg_history_identical(self):
-        np.testing.assert_array_equal(np.array(self.m.duality_gaps), self.f['dg'])
+        np.testing.assert_array_equal(np.array(self.m.history.duality_gap), self.f['dg'])
 
     def test_steps_history_identical(self):
-        np.testing.assert_array_equal(np.array(self.m.steps), self.f['steps'])
+        np.testing.assert_array_equal(np.array(self.m.history.step_size), self.f['steps'])
 
     def test_history_length(self):
         """All histories have length n_iter + 1 (iteration 0 is included)."""
         expected = int(self.f['n_iter']) + 1
-        self.assertEqual(len(self.m.fx), expected)
-        self.assertEqual(len(self.m.duality_gaps), expected)
-        self.assertEqual(len(self.m.steps), expected)
+        self.assertEqual(len(self.m.history.loss), expected)
+        self.assertEqual(len(self.m.history.duality_gap), expected)
+        self.assertEqual(len(self.m.history.step_size), expected)
 
     def test_M_identical(self):
         if 'M' not in self.f:
@@ -104,8 +104,9 @@ class _FWRegressionBase(unittest.TestCase):
     def test_M_absent_for_non_sparse(self):
         if 'M' in self.f:
             self.skipTest("sparse fixture")
-        with self.assertRaises(AttributeError):
-            _ = self.m.M
+        self.assertIsNone(self.m.M)
+        #with self.assertRaises(AttributeError):
+        #    _ = self.m.M
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +169,7 @@ class _PGDRegressionBase(unittest.TestCase):
         if 'mask' in f:
             fit_kwargs['mask'] = f['mask']
         pgd.fit(f['Y'], **fit_kwargs)
-        cls.pgd = pgd
+        cls.pgd = pgd.result
 
     def test_n_iter(self):
         self.assertEqual(self.pgd.n_iter, int(self.f['n_iter']))
@@ -177,15 +178,15 @@ class _PGDRegressionBase(unittest.TestCase):
         np.testing.assert_array_equal(self.pgd.X, self.f['X'])
 
     def test_fx_history_identical(self):
-        np.testing.assert_array_equal(np.array(self.pgd.fx), self.f['fx'])
+        np.testing.assert_array_equal(np.array(self.pgd.history.loss), self.f['fx'])
 
     def test_converged_in_interior(self):
-        self.assertEqual(self.pgd.converged_in_interior,
+        self.assertEqual(self.pgd.converged,
                          bool(self.f['converged_in_interior']))
 
     def test_history_length(self):
         """fx has length n_iter (no step-0 entry in PGD)."""
-        self.assertEqual(len(self.pgd.fx), int(self.f['n_iter']))
+        self.assertEqual(len(self.pgd.history.loss), int(self.f['n_iter']))
 
 
 # ---------------------------------------------------------------------------

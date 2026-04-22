@@ -5,6 +5,8 @@ import numpy as np
 import logging
 from .objectives import NNMObjective
 from .projections import NuclearNormProjection
+from .result import History, FitResult
+from .state import StopReason
 from ..utils.logs import CustomLogger
 
 class PGDWarmStart():
@@ -77,23 +79,8 @@ class PGDWarmStart():
  
  
     @property
-    def X(self):
-        return self.X_
- 
- 
-    @property
-    def fx(self):
-        return self.fx_list_
- 
- 
-    @property
-    def n_iter(self):
-        return self.n_iter_
- 
- 
-    @property
-    def converged_in_interior(self):
-        return self.converged_interior_
+    def result(self):
+        return self.result_
  
  
     def fit(self, Y, r, mask = None, weight = None):
@@ -125,15 +112,16 @@ class PGDWarmStart():
         projector = NuclearNormProjection(simplex_method = self.simplex_method_)
         X = np.zeros_like(obj.Y_)
         fx_old = np.inf
-        self.fx_list_ = []
-        self.converged_interior_ = False
+        fx_hist = []
+        converged_interior = False
+        stop_reason = StopReason.MAX_ITER
  
         for t in range(self.max_iter_):
 
-            self.n_iter_ = t + 1
+            n_iter = t + 1
 
             fx = obj.value(X)
-            self.fx_list_.append(fx)
+            fx_hist.append(fx)
 
             G = obj.gradient(X)
             X_candidate = X - eta * G
@@ -143,11 +131,11 @@ class PGDWarmStart():
             X = projector.proj
  
             if self.show_progress_:
-                if (self.n_iter_ == 1) or (self.n_iter_ % self.print_skip_ == 0):
+                if (n_iter == 1) or (n_iter % self.print_skip_ == 0):
                     nuc = projector.nuclear_norm_after_
                     tag = "clipped" if projector.is_clipped else "interior"
                     self.logger_.info(
-                        f"PGD iter {self.n_iter_:4d}  f = {fx:.4f}  "
+                        f"PGD iter {n_iter:4d}  f = {fx:.4f}  "
                         f"||X||_* = {nuc:.1f}  ({tag})"
                     )
 
@@ -168,16 +156,25 @@ class PGDWarmStart():
                     if self.show_progress_:
                         nuc = projector.nuclear_norm_after_
                         self.logger_.info(
-                            f"PGD iter {self.n_iter_:4d}  Converged in interior "
+                            f"PGD iter {n_iter:4d}  Converged in interior "
                             f"(||X||_* = {nuc:.1f} < r = {r:.1f})"
                         )
-                    self.converged_interior_ = True
+                    stop_reason = StopReason.RELATIVE_LOSS
+                    converged_interior = True
                     break
  
             fx_old = fx
- 
-        else:
-            self.n_iter_ = self.max_iter_
- 
-        self.X_ = X
+
+        self.result_  = FitResult(
+            X         = X,
+            history   = History(loss = fx_hist),
+            n_iter    = n_iter,
+            stop_reason = stop_reason,
+            converged = converged_interior,
+            message   = 'Converged in interior' if converged_interior else 'Max iterations',
+            metrics   = {
+                'nuclear_norm': float(np.linalg.norm(X, 'nuc'))
+                },
+        )
+
         return self
