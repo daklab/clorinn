@@ -25,7 +25,7 @@ class TestDegenerateInputs(unittest.TestCase):
             max_iter = 10,
             svd_method = 'direct',
             stop_criteria = ['duality_gap', 'step_size'],
-            suppress_warnings = True,
+            verbose = 0,
         )
 
     def _assert_feasible(self, result, radius):

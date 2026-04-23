@@ -37,6 +37,7 @@ References
 import numpy as np
 import logging
 from .projections import EuclideanProjection
+from .noise_cov_op import NoiseCovarianceOperator
 
 _logger = logging.getLogger(__name__)
 
@@ -289,11 +290,8 @@ class NNMCorrObjective(NNMObjective):
 
     Parameters
     ----------
-    L_inv : np.ndarray [size (n, n); dtype: float]
-        Inverse of the lower Cholesky factor of A  (L_inv = L^{-1}).
-
-    Sigma_inv : np.ndarray [size (n, n); dtype: float]
-        Inverse of the sampling covariance  (Sigma_inv = A^{-1} = L_inv^T @ L_inv).
+    noise_cov : np.ndarray [size (n, n); dtype: float]
+        Sampling covariance matrix
 
     Attributes
     ----------
@@ -310,24 +308,28 @@ class NNMCorrObjective(NNMObjective):
     by the off-diagonal structure of A^{-1}.
     """
 
-    def __init__(self, Y, radius, L_inv, Sigma_inv, mask = None, weight = None):
-        if L_inv is None or Sigma_inv is None:
-            raise ValueError(
-                "NNMCorrObjective requires both L_inv and Sigma_inv."
-            )
+    def __init__(self, Y, radius, noise_cov, mask = None, weight = None):
+        if noise_cov is None:
+            raise ValueError("NNMCorrObjective requires noise_cov.")
         super().__init__(Y, radius, mask = mask, weight = weight)
 
-        self.L_inv_     = L_inv
-        self.Sigma_inv_ = Sigma_inv
+        # handle noise covariance 
+        # # cov_op is stored on self so that the submatrix Cholesky cache
+        # (used by exact correlated-missingness gradient)
+        # persists across gradient() calls.
+        self.cov_op_ = NoiseCovarianceOperator(noise_cov)
+        self.L_inv_         = self.cov_op_.L_inv_
+        self.Sigma_inv_     = self.cov_op_.Sigma_inv_
+        self.pgd_step_size_ = self.cov_op_.pgd_step_size_
 
         # Cache the PGD step size: eta = lambda_min(A) = 1 / lambda_max(A^{-1}).
         # eigvalsh is used because Sigma_inv is symmetric positive definite.
-        lambda_max_Ainv     = float(np.linalg.eigvalsh(Sigma_inv).max())
-        self._pgd_step_size = 1.0 / lambda_max_Ainv
+        #lambda_max_Ainv     = float(np.linalg.eigvalsh(Sigma_inv).max())
+        #self.pgd_step_size_ = 1.0 / lambda_max_Ainv
 
         _logger.debug(
-            f"NNMCorrObjective: lambda_max(A^{{-1}})={lambda_max_Ainv:.4g}, "
-            f"pgd_step_size={self._pgd_step_size:.4g}"
+            f"NNMCorrObjective: lambda_max(A^{{-1}})={self.cov_op_.eigvals_.max():.4g}, "
+            f"pgd_step_size={self.pgd_step_size_:.4g}"
         )
         return
 
@@ -379,4 +381,4 @@ class NNMCorrObjective(NNMObjective):
 
         When A = I this recovers eta = 1.
         """
-        return self._pgd_step_size
+        return self.pgd_step_size_

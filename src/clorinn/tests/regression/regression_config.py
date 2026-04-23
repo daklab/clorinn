@@ -16,14 +16,14 @@ FW_CONFIG = dict(
     tol=1e-4,
     step_tol=1e-4,
     rel_tol=1e-8,
-    suppress_warnings=True,
+    verbose=0,
 )
 
 # PGDWarmStart kwargs
 PGD_CONFIG = dict(
     max_iter=50,
     rel_tol=1e-8,
-    suppress_warnings=True,
+    verbose=0,
 )
 
 # Constraints

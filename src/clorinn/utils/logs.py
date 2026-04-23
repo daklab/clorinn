@@ -47,6 +47,15 @@ def get_new_handler(formatter, logfile = None):
     handler.setFormatter(formatter)
     return handler
 
+def get_loglevel(verbose=0):
+    if verbose >= 2:
+        return logging.DEBUG
+    if verbose == 1:
+        return logging.INFO
+    # do not inherit root logger level if verbose = 0
+    # explicitly silence the logs when the user wants.
+    return logging.WARN   
+
 
 class CustomLogger(logging.getLoggerClass()):
 

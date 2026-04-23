@@ -3,7 +3,7 @@ invariant_utils.py
 ------------------
 Shared problem setup and solver configuration for invariant tests.
 
-_build_problem() returns a dict with Y, mask, L_inv, Sigma_inv.
+_build_problem() returns a dict with Y, mask, noise_cov.
 The problem is intentionally small (n=15, p=300) for fast test runs
 while being non-trivial enough that solvers take multiple steps.
 
@@ -17,6 +17,7 @@ than a handful of steps.
 import numpy as np
 
 from clorinn.tests import toy_data
+from clorinn.utils import SamplingCovariance
 
 
 # ---------------------------------------------------------------------------
@@ -32,14 +33,14 @@ FW_CONFIG = dict(
     tol             = 1e-4,
     step_tol        = 1e-4,
     rel_tol         = 1e-8,
-    suppress_warnings = True,
+    verbose         = 0,
 )
 
 # PGDWarmStart kwargs shared by all invariant PGD runs.
 PGD_CONFIG = dict(
     max_iter        = 50,
     rel_tol         = 1e-8,
-    suppress_warnings = True,
+    verbose         = 0,
 )
 
 # Constraints
@@ -60,8 +61,7 @@ def _build_problem():
     dict with keys:
         Y         : np.ndarray (n, p)  column-centred Z-score matrix
         mask      : np.ndarray (n, p)  bool, 10 % missing entries
-        L_inv     : np.ndarray (n, n)  inverse Cholesky factor of A
-        Sigma_inv : np.ndarray (n, n)  A^{-1}
+        noise_cov : np.ndarray (n, p)  sampling covariance matrix
     """
     np.random.seed(0)
     n, p, k, Q = 15, 300, 4, 2
@@ -78,8 +78,6 @@ def _build_problem():
     rng = np.random.default_rng(7)
     B = rng.standard_normal((n, n))
     A = B @ B.T / n + np.eye(n) * 0.5
-    L_chol   = np.linalg.cholesky(A)
-    L_inv    = np.linalg.solve(L_chol, np.eye(n))
-    Sigma_inv = L_inv.T @ L_inv
+    noise_cov = SamplingCovariance.from_matrix(A)
 
-    return dict(Y=Y, mask=mask, L_inv=L_inv, Sigma_inv=Sigma_inv)
+    return dict(Y=Y, mask=mask, noise_cov=noise_cov)

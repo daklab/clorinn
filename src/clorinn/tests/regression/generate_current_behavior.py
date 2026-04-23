@@ -29,8 +29,7 @@ with the test file, so there is a single source of truth.
   Y             float64 (n, p)    input matrix
   radius        float64 scalar    nuclear-norm constraint radius
   mask          bool    (n, p)    [omitted when not used]
-  L_inv         float64 (n, n)    [omitted when not used]
-  Sigma_inv     float64 (n, n)    [omitted when not used]
+  noise_cov     float64 (n, n)    [omitted when not used]
   l1_multiplier float64 scalar    multiplier for l1_threshold [omitted when not used]
 
   Outputs (FrankWolfe)
@@ -59,6 +58,7 @@ import numpy as np
 from clorinn.optimize import FrankWolfe, PGDWarmStart
 from clorinn.tests import toy_data
 from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
+from clorinn.utils import SamplingCovariance
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 os.makedirs(FIXTURES_DIR, exist_ok=True)
@@ -89,11 +89,9 @@ def _build_problem():
     rng = np.random.default_rng(7)
     B = rng.standard_normal((n, n))
     A = B @ B.T / n + np.eye(n) * 0.5
-    L_chol = np.linalg.cholesky(A)
-    L_inv = np.linalg.solve(L_chol, np.eye(n))
-    Sigma_inv = L_inv.T @ L_inv                    # == A^{-1}
+    noise_cov = SamplingCovariance.from_matrix(A)
 
-    return dict(Y=Y, mask=mask, L_inv=L_inv, Sigma_inv=Sigma_inv)
+    return dict(Y=Y, mask=mask, A=A, noise_cov = noise_cov)
 
 
 # ---------------------------------------------------------------------------
@@ -161,11 +159,10 @@ def gen_nnm_sparse_mask(prob):
 def gen_nnm_corr(prob):
     """TC5: NNM-Corr (Mahalanobis loss), fully observed."""
     m = FrankWolfe(model='nnm-corr', **FW_CONFIG)
-    m.fit(prob['Y'], radius=R_NUC, L_inv=prob['L_inv'], Sigma_inv=prob['Sigma_inv'])
+    m.fit(prob['Y'], radius=R_NUC, noise_cov=prob['noise_cov'])
     _save(
         os.path.join(FIXTURES_DIR, 'nnm_corr.npz'),
-        Y=prob['Y'], radius=np.float64(R_NUC),
-        L_inv=prob['L_inv'], Sigma_inv=prob['Sigma_inv'],
+        Y=prob['Y'], radius=np.float64(R_NUC), A=prob['A'],
         X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
         steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
@@ -174,12 +171,10 @@ def gen_nnm_corr(prob):
 def gen_nnm_corr_mask(prob):
     """TC6: NNM-Corr, 10 % missing data."""
     m = FrankWolfe(model='nnm-corr', **FW_CONFIG)
-    m.fit(prob['Y'], radius=R_NUC, mask=prob['mask'],
-          L_inv=prob['L_inv'], Sigma_inv=prob['Sigma_inv'])
+    m.fit(prob['Y'], radius=R_NUC, mask=prob['mask'], noise_cov=prob['noise_cov'])
     _save(
         os.path.join(FIXTURES_DIR, 'nnm_corr_mask.npz'),
-        Y=prob['Y'], radius=np.float64(R_NUC), mask=prob['mask'],
-        L_inv=prob['L_inv'], Sigma_inv=prob['Sigma_inv'],
+        Y=prob['Y'], radius=np.float64(R_NUC), mask=prob['mask'], A=prob['A'],
         X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
         steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )

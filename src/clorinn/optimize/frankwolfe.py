@@ -10,8 +10,8 @@ from .projections import EuclideanProjection
 from .result import History, FitResult
 from .config import SolverConfig
 from .state import IterState, StopReason
-from ..utils.logs import CustomLogger
-
+from ..utils.logs import get_loglevel, CustomLogger
+from ..utils.sampling_covariance import SamplingCovariance
 
 
 class FrankWolfe():
@@ -68,33 +68,20 @@ class FrankWolfe():
         Threshold for the change in objective function in successive iterations,
         see 'stop_criteria'.
 
-    show_progress : boolean, default=False
-        Display progress of the FW algorithm. If true, then the step size and duality gap 
-        is printed on the console after every few steps. The number of steps skipped 
-        between each print is specified by 'print_skip'.
+    verbose : int, default=1
+        Controls the verbosity of solver output.  Three levels are
+        recognised:
+            0  Silent.  Only warnings and errors are reported. 
+               Equivalent to logging.WARN.
+            1  Progress.  Equivalent to logging.INFO. 
+               Logs iteration count, step size, and duality gap at convergence.
+            2  Debug.  Equivalent to logging.DEBUG.
+               Logs all debugging outputs.
+        Higher values are treated as 2.
 
     print_skip : integer, default=None
-        Number of steps skipped between each printed step if `show_progress = True`.
+        Number of steps skipped between each printed step if `verbose = 1`.
         If set to None, it is automatically estimated from `max_iter`.
-
-    debug : boolean, default=False
-        Whether to provide a verbose output for debugging the algorithm.
-
-    suppress_warnings : boolean, default=False
-        Whether to suppress the warnings. If True, the loglevel is set to ERROR.
-        It can be used for a silent run.
-
-
-    Debugging Notes
-    ---------------
-        The default project logging level is WARN. The logging level can be modified 
-        using the following flags:
-            - `debug = True` sets the logging level to DEBUG.
-            - `show_progress = True` sets the logging level to INFO. 
-            - `suppress_warnings = True` sets the logging level to ERROR.
-        The lowest setting always takes precedence. For example, `debug = True, 
-        show_progress = False` sets logging level to DEBUG. `debug = False, 
-        show_progress = True, suppress_warnings = True` sets logging level to INFO.
 
     """
     def __init__(self, max_iter = 1000,
@@ -102,8 +89,7 @@ class FrankWolfe():
             stop_criteria = ['duality_gap', 'step_size', 'relative_loss', 'relative_dg'],
             model = 'nnm', simplex_method = 'sort',
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
-            show_progress = False, print_skip = None,
-            debug = False, suppress_warnings = False):
+            verbose = 1, print_skip = None):
 
         self.model_ = model
 
@@ -118,23 +104,17 @@ class FrankWolfe():
             simplex_method = simplex_method,
         )
                 
-        self.show_progress_ = show_progress
         self.prog_step_skip_ = print_skip
-        if self.show_progress_ and self.prog_step_skip_ is None:
-            self.prog_step_skip_ = max(1, int(self.cfg_.max_iter / 100)) * 10
+        if verbose > 0 and self.prog_step_skip_ is None:
+            if verbose == 1:
+                self.prog_step_skip_ = max(1, int(self.cfg_.max_iter / 100)) * 10
+            elif verbose > 1:
+                self.prog_step_skip_ = 1
 
         # Logger
-        loglevel = None
-        if debug: 
-            loglevel = logging.DEBUG
-        elif show_progress:
-            loglevel = logging.INFO
-        elif suppress_warnings:
-            loglevel = logging.ERROR
+        loglevel = get_loglevel(verbose)
         self.logger_ = CustomLogger(__name__, level = loglevel)
-        #self.logger_.override_global_default_loglevel(loglevel)
         self.logger_.override_subsystem_loglevel(loglevel)
-        self.suppress_warnings_ = suppress_warnings
 
         return
 
@@ -157,7 +137,7 @@ class FrankWolfe():
     # Objective factory
     # ------------------------------------------------------------------
  
-    def _make_objective(self, Y, radius, sparse_scale, mask, weight, L_inv, Sigma_inv):
+    def _make_objective(self, Y, radius, sparse_scale, mask, weight, noise_cov):
         """
         Construct and return the objective instance for the requested model.
  
@@ -177,7 +157,7 @@ class FrankWolfe():
  
         elif self.model_ == 'nnm-corr':
             return NNMCorrObjective(
-                Y, radius, L_inv, Sigma_inv,
+                Y, radius, noise_cov,
                 mask = mask, weight = weight,
             )
  
@@ -558,7 +538,7 @@ class FrankWolfe():
     def fit(self, Y, radius,
             sparse_scale = None,
             weight = None, mask = None, X0 = None,
-            L_inv = None, Sigma_inv = None):
+            noise_cov = None):
 
         '''
         Wrapper function for the low rank matrix approximation (LRMA)
@@ -588,13 +568,11 @@ class FrankWolfe():
             Optional initial guess for the low rank matrix in the FW algorithm. 
             Defaults to zeros.
 
-        L_inv : np.ndarray [size (n, n); dtype: float], default=None
-            Inverse Cholesky factor of the sampling covariance A.
-            Required for model='nnm-corr'.
- 
-        Sigma_inv : np.ndarray [size (n, n); dtype: float], default=None
-            Inverse of the sampling covariance matrix A = L L^T.
-            Required for model='nnm-corr'.
+        noise_cov : np.ndarray [size (n, n); dtype: float], default=None
+            Sampling covariance matrix A. Required for model='nnm-corr'.
+            Must be created / validated from SamplingCovariance, e.g.:
+                A = SamplingCovariance.from_matrix(raw_cov_from_ldsc)
+                A = SamplingCovariance.from_ldsc(...)
 
 
         Note
@@ -612,9 +590,19 @@ class FrankWolfe():
         self.logger_.debug(f"Shape of input data = {Y.shape}")
 
         # ---------------------
+        # Validations
+        # ---------------------
+        if self.model_ == 'nnm-corr' and noise_cov is None:
+            raise ValueError(
+                "model='nnm-corr' requires a covariance argument. "
+                "Construct one via SamplingCovariance.from_matrix(A)."
+            )
+            if isinstance(noise_cov, np.ndarray): noise_cov = SamplingCovariance.from_matrix(noise_cov)
+
+        # ---------------------
         # Build objective
         # ---------------------
-        self.obj_ = self._make_objective(Y, radius, sparse_scale, mask, weight, L_inv, Sigma_inv)
+        self.obj_ = self._make_objective(Y, radius, sparse_scale, mask, weight, noise_cov)
 
         self.logger_.debug(
             f"Masked entries = {np.sum(self.obj_.mask_) if self.obj_.mask_ is not None else 0}"
@@ -677,12 +665,7 @@ class FrankWolfe():
                 fm_hist.append(fm)
                 fl_hist.append(fl)
 
-            # The logger would not print anything if logging level is higher than INFO.
-            # The outer if loop reduces some workload of the logger class.
-            # However, this introduces a bug: if debug = True and show_progress = False,
-            # then the logging level is DEBUG but the steps are not printed. 
-            # I can live with that bug.
-            if self.show_progress_:
+            if self.prog_step_skip_ is not None:
                 if (iter_state.istep == 1) or (iter_state.istep % self.prog_step_skip_ == 0):
                     self.logger_.info(f"Iteration {iter_state.istep}. Step size {step_size:.3f}. Duality Gap {dg:g}")
 

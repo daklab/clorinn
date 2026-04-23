@@ -2,12 +2,11 @@
 # License: BSD 3 clause
 
 import numpy as np
-import logging
 from .objectives import NNMObjective
 from .projections import NuclearNormProjection
 from .result import History, FitResult
 from .state import StopReason
-from ..utils.logs import CustomLogger
+from ..utils.logs import get_loglevel, CustomLogger
 
 class PGDWarmStart():
     """
@@ -38,44 +37,42 @@ class PGDWarmStart():
         Algorithm for the simplex sub-projection inside the nuclear norm
         ball projection. See EuclideanProjection for available options.
  
-    show_progress : boolean, default=False
-        Print iteration progress at each step (or every print_skip steps).
- 
-    print_skip : integer, default=10
+    print_skip : integer, default=None
         Number of steps skipped between each printed step
-        if `show_progress = True`.
+        if `verbose = 1`.
 
-    debug : boolean, default=False
-        Set log level to DEBUG for this instance.
- 
-    suppress_warnings : boolean, default=True
-        Suppress WARNING-level messages.  Set to False to see convergence
-        warnings.
+    verbose : int, default=1
+        Controls the verbosity of solver output.  Three levels are
+        recognised:
+            0  Silent.  Only warnings and errors are reported.
+               Equivalent to logging.WARN.
+            1  Progress.  Equivalent to logging.INFO.
+               Logs iteration count, step size, and duality gap at convergence.
+            2  Debug.  Equivalent to logging.DEBUG.
+               Logs all debugging outputs.
+        Higher values are treated as 2.
     """
  
     def __init__(self, max_iter = 50, rel_tol = 1e-6,
                  simplex_method = 'sort',
-                 show_progress = False,
-                 print_skip = 1,
-                 debug = False,
-                 suppress_warnings = True):
+                 print_skip = None,
+                 verbose = 1):
         self.max_iter_       = max_iter
         self.rel_tol_        = rel_tol
         self.simplex_method_ = simplex_method
-        self.show_progress_  = show_progress
-        self.print_skip_     = print_skip
+        self.prog_step_skip_     = print_skip
+
+        self.prog_step_skip_ = print_skip
+        if verbose > 0 and self.prog_step_skip_ is None:
+            if verbose == 1:
+                self.prog_step_skip_ = max(1, int(self.max_iter_ / 10))
+            elif verbose > 1:
+                self.prog_step_skip_ = 1
+
         # set logger for this class
-        loglevel = None
-        if debug: 
-            loglevel = logging.DEBUG
-        elif show_progress:
-            loglevel = logging.INFO
-        elif suppress_warnings:
-            loglevel = logging.ERROR
+        loglevel = get_loglevel(verbose)
         self.logger_ = CustomLogger(__name__, level = loglevel)
-        #self.logger_.override_global_default_loglevel(loglevel)
         self.logger_.override_subsystem_loglevel(loglevel)
-        self.suppress_warnings_ = suppress_warnings
         return
  
  
@@ -84,7 +81,7 @@ class PGDWarmStart():
         return self.result_
  
  
-    def fit(self, Y, radius, mask = None, weight = None):
+    def fit(self, Y, radius, mask = None, weight = None, noise_cov = None):
         """
         Run PGD warm start.
  
@@ -101,6 +98,12 @@ class PGDWarmStart():
  
         weight : np.ndarray [size (n, p); dtype: float] or None
             Per-element weights.
+
+        noise_cov : np.ndarray [size (n, n); dtype: float], default=None
+            Sampling covariance matrix A. Required for model='nnm-corr'.
+            Must be created / validated from SamplingCovariance, e.g.:
+                A = SamplingCovariance.from_matrix(raw_cov_from_ldsc)
+                A = SamplingCovariance.from_ldsc(...)
  
         Returns
         -------
@@ -131,8 +134,8 @@ class PGDWarmStart():
             projector.fit(X_candidate, radius)
             X = projector.proj
  
-            if self.show_progress_:
-                if (n_iter == 1) or (n_iter % self.print_skip_ == 0):
+            if self.prog_step_skip_ is not None:
+                if (n_iter == 1) or (n_iter % self.prog_step_skip_ == 0):
                     nuc = projector.nuclear_norm_after_
                     tag = "clipped" if projector.is_clipped else "interior"
                     self.logger_.info(
@@ -142,7 +145,7 @@ class PGDWarmStart():
 
             # Stop if projection clipped: constraint is active, hand off to FW
             # if projector.is_clipped:
-            #     if self.show_progress_:
+            #     if self.prog_step_skip_ is not None:
             #         self.logger_.info(
             #             f"PGD iter {self.n_iter_:4d}  Nuclear norm constraint active "
             #             f"({projector.nuclear_norm_before_:.1f} -> {r:.1f}). "
@@ -154,7 +157,7 @@ class PGDWarmStart():
             if t > 0 and np.isfinite(fx_old):
                 rel = abs(fx - fx_old) / max(1.0, abs(fx_old))
                 if rel < self.rel_tol_:
-                    if self.show_progress_:
+                    if self.prog_step_skip_ is not None:
                         nuc = projector.nuclear_norm_after_
                         self.logger_.info(
                             f"PGD iter {n_iter:4d}  Converged in interior "

@@ -1,1 +1,2 @@
 from .matrix_factorization import MatrixFactorization
+from .sampling_covariance import SamplingCovariance

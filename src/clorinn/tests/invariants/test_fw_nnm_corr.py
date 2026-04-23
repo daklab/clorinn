@@ -38,8 +38,7 @@ class TestFWNNMCorrFull(FWInvariantBase):
         cls.logger_.info("Setting up FW / NNM-Corr / full invariant tests")
         prob = _build_problem()
         m = FrankWolfe(model='nnm-corr', **FW_CONFIG)
-        m.fit(prob['Y'], radius=R_NUC,
-              L_inv=prob['L_inv'], Sigma_inv=prob['Sigma_inv'])
+        m.fit(prob['Y'], radius=R_NUC, noise_cov=prob['noise_cov'])
         cls.result = m.result
         cls.radius = R_NUC
 
@@ -57,8 +56,7 @@ class TestFWNNMCorrMask(FWInvariantBase):
         cls.logger_.info("Setting up FW / NNM-Corr / mask invariant tests")
         prob = _build_problem()
         m = FrankWolfe(model='nnm-corr', **FW_CONFIG)
-        m.fit(prob['Y'], radius=R_NUC, mask=prob['mask'],
-              L_inv=prob['L_inv'], Sigma_inv=prob['Sigma_inv'])
+        m.fit(prob['Y'], radius=R_NUC, mask=prob['mask'], noise_cov=prob['noise_cov'])
         cls.result = m.result
         cls.radius = R_NUC
 

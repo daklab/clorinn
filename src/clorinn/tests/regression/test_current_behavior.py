@@ -30,6 +30,7 @@ import os
 import unittest
 import numpy as np
 
+from clorinn.utils import SamplingCovariance
 from clorinn.optimize import FrankWolfe, PGDWarmStart
 from clorinn.utils.logs import CustomLogger
 from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
@@ -70,9 +71,8 @@ class _FWRegressionBase(unittest.TestCase):
         fit_kwargs = dict(radius=float(f['radius']))
         if 'mask' in f:
             fit_kwargs['mask'] = f['mask']
-        if 'L_inv' in f:
-            fit_kwargs['L_inv'] = f['L_inv']
-            fit_kwargs['Sigma_inv'] = f['Sigma_inv']
+        if 'A' in f:
+            fit_kwargs['noise_cov'] = SamplingCovariance.from_matrix(f['A'])
         if 'sparse_scale' in f:
             fit_kwargs['sparse_scale'] = float(f['sparse_scale'])
 
