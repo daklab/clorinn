@@ -35,6 +35,18 @@ cd clorinn
 pip install -e .
 ```
 
+## Running tests
+```bash
+# 1. Console entry point (requires pip install -e .)
+clorinn --test
+
+# 2. Package module invocation (works without install, just needs src/ on PYTHONPATH)
+python -m clorinn --test
+
+# 3. Specific test class by name
+python -m clorinn --test --testmodule TestConvergedNuclearNorm
+```
+
 ## Related algorithms
 
 Also see Sparse PCA, RobustPCA, Weighted PCA, and Bayesian PCA.

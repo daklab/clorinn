@@ -78,7 +78,13 @@ def main():
 
     if opts.test or len(opts.testmodules) > 0:
         mlogger.debug("Calling logger from main")
-        run_unittests(test_class_names = opts.testmodules)
+        if opts.vverbose:
+            verbosity = 2
+        elif opts.verbose:
+            verbosity = 1
+        else:
+            verbosity = 0
+        run_unittests(test_class_names = opts.testmodules, verbosity = verbosity)
 
     elif opts.version:
         show_version()

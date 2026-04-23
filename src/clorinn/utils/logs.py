@@ -13,11 +13,24 @@ from . import project
 
 loggers = {}
 
-class ShortNameFormatter(logging.Formatter):
-    """Strip the top-level package prefix from logger names."""
+class SubsystemNameFormatter(logging.Formatter):
+    """
+    Strip the top-level package prefix: 
+        e.g. 'clorinn.optimize.frankwolfe' -> 'optimize.frankwolfe'.
+    """
     def format(self, record):
-        parts = record.name.split('.', 1)      # ['clorinn', 'optimize.frankwolfe']
+        parts = record.name.split('.', 1)
         record.name = parts[1] if len(parts) > 1 else parts[0]
+        return super().format(record)
+
+
+class ShortNameFormatter(logging.Formatter):
+    """
+    Keep only the module filename:
+        e.g. 'clorinn.optimize.frankwolfe' -> 'frankwolfe'.
+    """
+    def format(self, record):
+        record.name = record.name.split('.')[-1]
         return super().format(record)
 
 
@@ -78,6 +91,31 @@ class CustomLogger(logging.getLoggerClass()):
         return
 
 
+    def override_subsystem_loglevel(self, level):
+        """
+        stop using the root clorinn logger as a global dial 
+        and instead scope each subsystem to its own sub-hierarchy:
+
+            clorinn           ← root, set once at startup, never touched again
+            clorinn.optimize  ← all solvers propagate here
+            clorinn.tests     ← all tests propagate here
+            clorinn.utils     ← utils propagate here
+            ...
+
+        Edge case
+        ---------
+        If a top-level logger named exactly 'clorinn' itself calls this function,
+        then `split('.')[1]' would raise IndexError - but that logger is created by 
+        `_setup_root_logger` and never calls `override_subsystem_loglevel`, 
+        so it cannot arise in practice.
+        """
+        subsystem = self.logger.name.split('.')[1]
+        name = f"{project.get_name()}.{subsystem}"
+        subsystem_logger = self.register_logger(name) 
+        if level is not None:
+            subsystem_logger.setLevel(level)
+
+
     def set_loglevel(self, level):
         if level is None: level = self.logger.parent.getEffectiveLevel()
         if not self.logger.getEffectiveLevel() == level:
@@ -90,7 +128,9 @@ class CustomLogger(logging.getLoggerClass()):
         # A logger is unique by name, meaning that if a logger with the name `foo` 
         # has been created, the consequent calls of `logging.getLogger("foo")` 
         # will return the same object.
-        self.register_logger(name)
+        is_new = True if not loggers.get(name) else False
+
+        self.logger = self.register_logger(name)
 
         # The log level can be altered during runtime.
         # Inherit parent logging level if level = None
@@ -109,6 +149,10 @@ class CustomLogger(logging.getLoggerClass()):
             formatter = get_new_formatter(fmt)
             handler   = get_new_handler(formatter, logfile)
             self.logger.addHandler(handler)
+
+        if is_new:
+            self.logger.debug(f"Created {self.logger}, Parent: {self.logger.parent}")
+
         return
 
 
@@ -129,14 +173,12 @@ class CustomLogger(logging.getLoggerClass()):
 
 
     def register_logger(self, name):
-        self.logger = loggers.get(name)
-        if not self.logger:
-            self.logger = logging.getLogger(name)
-            loggers[name] = self.logger
-            self.logger.debug(f"Created {self.logger}, Parent: {self.logger.parent}")
-        #else:
-        #    self.logger.debug(f"Using old {self.logger}")
-        return
+        newlogger = loggers.get(name)
+        if not newlogger:
+            newlogger = logging.getLogger(name)
+            loggers[name] = newlogger
+        return newlogger
+
 
 def _setup_root_logger():
     """

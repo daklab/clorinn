@@ -73,7 +73,8 @@ class PGDWarmStart():
         elif suppress_warnings:
             loglevel = logging.ERROR
         self.logger_ = CustomLogger(__name__, level = loglevel)
-        self.logger_.override_global_default_loglevel(loglevel)
+        #self.logger_.override_global_default_loglevel(loglevel)
+        self.logger_.override_subsystem_loglevel(loglevel)
         self.suppress_warnings_ = suppress_warnings
         return
  

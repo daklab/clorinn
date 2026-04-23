@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 
 from clorinn.optimize import FrankWolfe
+from clorinn.utils.logs import CustomLogger
 
 class TestDegenerateInputs(unittest.TestCase):
     """
@@ -14,6 +15,9 @@ class TestDegenerateInputs(unittest.TestCase):
       - infeasible iterates
       - crashes on nearly-empty masked problems
     """
+
+    def setUp(self):
+        self.logger_ = CustomLogger(__name__)
 
     def _make_solver(self):
         return FrankWolfe(
@@ -42,6 +46,7 @@ class TestDegenerateInputs(unittest.TestCase):
         self.assertLessEqual(nuc, radius + 1e-10)
 
     def test_zero_matrix(self):
+        self.logger_.info("Testing zero matrix input")
         Y      = np.zeros((2, 3))
         radius = 1.0
         result = self._make_solver().fit(Y, radius).result
@@ -50,6 +55,7 @@ class TestDegenerateInputs(unittest.TestCase):
 
     def test_rank_one_matrix(self):
         """Near-zero denominators can arise from rank-1 input."""
+        self.logger_.info("Testing rank-1 matrix input")
         Y = np.array([
             [2.0, 4.0, 6.0],
             [1.0, 2.0, 3.0],
@@ -62,9 +68,10 @@ class TestDegenerateInputs(unittest.TestCase):
         """
         Only one entry observed.  Loss must equal 0.5 * (Y[0,1] - X[0,1])^2.
 
-        NOTE: currently raises numpy.linalg.LinAlgError: SVD did not converge.
-        This is a known edge-case bug to be fixed.
+        NOTE: earlier raised numpy.linalg.LinAlgError: SVD did not converge.
+        This is a known edge-case bug which was fixed.
         """
+        self.logger_.info("Testing single observed entry")
         Y = np.array([
             [1.0, 2.0, 3.0],
             [4.0, 5.0, 6.0],

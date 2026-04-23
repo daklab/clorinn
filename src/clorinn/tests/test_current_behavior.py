@@ -31,6 +31,7 @@ import unittest
 import numpy as np
 
 from clorinn.optimize import FrankWolfe, PGDWarmStart
+from clorinn.utils.logs import CustomLogger
 from clorinn.tests.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
@@ -59,6 +60,8 @@ class _FWRegressionBase(unittest.TestCase):
         if not cls.fixture_name:
             raise unittest.SkipTest("base class")
 
+        cls.logger_ = CustomLogger(__name__)
+        cls.logger_.info(f"[{cls.model}] loading {cls.fixture_name}")
         f = _load(cls.fixture_name)
         cls.f = f
 
@@ -169,6 +172,9 @@ class _PGDRegressionBase(unittest.TestCase):
     def setUpClass(cls):
         if not cls.fixture_name:
             raise unittest.SkipTest("base class")
+
+        cls.logger_ = CustomLogger(__name__)
+        cls.logger_.info(f"[pgd] loading {cls.fixture_name}")
 
         f = _load(cls.fixture_name)
         cls.f = f

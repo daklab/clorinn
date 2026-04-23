@@ -15,18 +15,18 @@ def get_test_classes(class_names = ['all']):
     return test_classes
 
 
-def run_unittests(test_class_names = None):
+def run_unittests(test_class_names = None, verbosity = 0):
     # Run all tests if no class name is specified
     if test_class_names is None:
         test_class_names = ['all']
     test_classes = get_test_classes(test_class_names)
-    tester = UnittestTester(test_classes)
+    tester = UnittestTester(test_classes, verbosity = verbosity)
     tester.execute()
     del tester
     # =========================
     # if you want report for each class separately,
     # =========================
     #for mtest in test_classes:
-    #    tester = UnittestTester(mtest)
+    #    tester = UnittestTester(mtest, verbosity = verbosity)
     #    del tester
     return
