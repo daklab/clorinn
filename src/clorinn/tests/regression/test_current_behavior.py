@@ -32,7 +32,7 @@ import numpy as np
 
 from clorinn.optimize import FrankWolfe, PGDWarmStart
 from clorinn.utils.logs import CustomLogger
-from clorinn.tests.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
+from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 

@@ -89,12 +89,12 @@ class UnittestResult(unittest.TextTestResult):
     def startTest(self, test):
         unittest.TestResult.startTest(self, test)  # skip TextTestResult's stream write
         if self.showAll:
-            self._logger.info(f"{self.getDescription(test)} ...")
+            self._logger.info(f"{self.getDescription(test)} ... start")
 
     def addSuccess(self, test):
         super(unittest.TextTestResult, self).addSuccess(test)
         if self.showAll:
-            self._logger.info(f"{self.getDescription(test)} ... ok")
+            self._logger.info(f"{self.getDescription(test)} ... PASS")
         elif self.dots:
             self._logger.info(f"PASS")
 
@@ -103,7 +103,7 @@ class UnittestResult(unittest.TextTestResult):
         if self.showAll:
             self._logger.info(f"{self.getDescription(test)} ... skipped '{reason}'")
         elif self.dots:
-            self._logger.info(f"SKIP '{reason}'")
+            self._logger.info(f"skipped '{reason}'")
 
     def addFailure(self, test, err):
         super(unittest.TextTestResult, self).addFailure(test, err)

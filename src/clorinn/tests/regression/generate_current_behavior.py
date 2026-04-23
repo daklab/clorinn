@@ -58,7 +58,7 @@ import numpy as np
 
 from clorinn.optimize import FrankWolfe, PGDWarmStart
 from clorinn.tests import toy_data
-from clorinn.tests.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
+from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 os.makedirs(FIXTURES_DIR, exist_ok=True)
