@@ -27,7 +27,7 @@ from .invariants.test_pgd_nnm import TestPGDNNMFull, TestPGDNNMMask
 """
 Tests that encode specific equations / update rules from the design document.
 """
-
+from .theory.test_nnm_corr_exact_missingness import TestNNMCorrExactMissingness
 
 # ---------------------------------------------------------------------------
 # Regression tests

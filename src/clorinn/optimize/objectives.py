@@ -36,6 +36,7 @@ References
 
 import numpy as np
 import logging
+from dataclasses import dataclass
 from .projections import EuclideanProjection
 from .noise_cov_op import NoiseCovarianceOperator
 
@@ -150,6 +151,7 @@ class NNMObjective():
         Dm = self._masked(D)
         Qt = Dm if self.weight_mask_ is None else self.weight_mask_ * Dm
         return float(np.linalg.norm(Qt, 'fro') ** 2)
+        #return self.squared_frobenius_norm(Qt)
 
 
     def value(self, X):
@@ -161,7 +163,8 @@ class NNMObjective():
         R = self._masked(self.Y_ - X)
         if self.weight_mask_ is not None:
             R = self.weight_mask_ * R
-        return float(0.5 * np.linalg.norm(R, 'fro') ** 2)
+        #return float(0.5 * np.linalg.norm(R, 'fro') ** 2)
+        return 0.5 * self.squared_frobenius_norm(R)
 
 
     @property
@@ -182,6 +185,12 @@ class NNMObjective():
         raise NotImplementedError(
             "project_sparse is only available for NNMSparseObjective."
         )
+
+
+    def squared_frobenius_norm(self, X):
+        """Slightly cheaper Frobenius norm / small gain, but in inner loop."""
+        #return float(np.einsum('ij,ij->', X, X))
+        return float(np.sum(X * X))
 
 
     # ------------------------------------------------------------------
@@ -276,36 +285,57 @@ class NNMSparseObjective(NNMObjective):
 # NNM-Corr objective  (Mahalanobis loss)
 # ---------------------------------------------------------------------------
 
+@dataclass
+class PatternBlock:
+    obs_idx   : np.ndarray   # sorted observed trait indices, shape (|O|,)
+    col_idx   : np.ndarray   # SNP column indices, shape (|I_O|,)
+    L_inv     : np.ndarray   # L_O^{-1}, shape (|O|, |O|)
+    Sigma_inv : np.ndarray   # A_O^{-1} = L_O^{-T} L_O^{-1}, shape (|O|, |O|)
+    lam_min   : float
+
+
 class NNMCorrObjective(NNMObjective):
     """
     Mahalanobis-type loss for the correlated-error NNM problem (NNM-Corr).
 
-    Replaces the isotropic Frobenius loss with
+    Fully observed case
+    -------------------
+    Replaces the isotropic Frobenius loss with the Mahalanobis-type loss
 
-        f(X) = (1/2) * || L^{-1} (R ⊙ (Z - X)) ||_F^2,
+
+        f(X) = (1/2) * || L^{-1} (Z - X) ||_F^2,
 
     where A = L L^T is the sampling covariance matrix induced by sample
-    overlap across GWAS traits (Section 2 of [1]).  The nuclear norm oracle
-    and stopping criteria are unchanged.
+    overlap across GWAS traits.  The nuclear norm oracle and stopping 
+    criteria are unchanged.
+
+    Missing data (exact formulation)
+    ---------------------------------
+    When the input Z has missing entries, the loss is restricted to the
+    observed coordinates of each SNP,
+    
+        f(X) = (1/2) * sum_i (z_i - x_i)_{O_i}^T A_{O_i}^{-1} (z_i - x_i)_{O_i},
+    
+    where O_i is the set of observed traits for SNP i and A_{O_i} is the
+    principal submatrix of A indexed by O_i.  Applying the full A^{-1} and
+    re-masking is an approximation that can bias the loss toward directions
+    of high noise correlation.  The exact formulation avoids this by using
+    only the submatrix A_{O_i}^{-1} for each SNP.
+    
+    At construction, all distinct missingness patterns {O_i} are identified,
+    their submatrix Cholesky factors L_{O_i} are precomputed once, and the
+    results are stored as PatternBlock objects.  gradient(), step_denom(),
+    value(), and pgd_step_size all dispatch to the per-pattern path when
+    missing data is present, and to the fast global path otherwise.
+
 
     Parameters
     ----------
-    noise_cov : np.ndarray [size (n, n); dtype: float]
-        Sampling covariance matrix
+    Y, radius, mask, weight : see NNMObjective
 
-    Attributes
-    ----------
-    L_inv_ : np.ndarray [size (n, n)]
-        Stored Cholesky inverse.
+    noise_cov : SamplingCovariance
+        See utils/sampling_covariance.py for this object.
 
-    Sigma_inv_ : np.ndarray [size (n, n)]
-        Stored covariance inverse.
-
-    Notes
-    -----
-    The mask is applied before the A^{-1} product and again afterwards.
-    The second application zeros out leakage at missing positions introduced
-    by the off-diagonal structure of A^{-1}.
     """
 
     def __init__(self, Y, radius, noise_cov, mask = None, weight = None):
@@ -320,17 +350,18 @@ class NNMCorrObjective(NNMObjective):
         self.cov_op_ = NoiseCovarianceOperator(noise_cov)
         self.L_inv_         = self.cov_op_.L_inv_
         self.Sigma_inv_     = self.cov_op_.Sigma_inv_
-        self.pgd_step_size_ = self.cov_op_.pgd_step_size_
 
-        # Cache the PGD step size: eta = lambda_min(A) = 1 / lambda_max(A^{-1}).
-        # eigvalsh is used because Sigma_inv is symmetric positive definite.
-        #lambda_max_Ainv     = float(np.linalg.eigvalsh(Sigma_inv).max())
-        #self.pgd_step_size_ = 1.0 / lambda_max_Ainv
+        # build missingness pattern
+        self.patterns_ = self._build_patterns(self.mask_)
+
+        # Cache the PGD step size
+        self.pgd_step_size_ = min(pat.lam_min for pat in self.patterns_)
 
         _logger.debug(
-            f"NNMCorrObjective: lambda_max(A^{{-1}})={self.cov_op_.eigvals_.max():.4g}, "
-            f"pgd_step_size={self.pgd_step_size_:.4g}"
+            f"NNMCorrObjective: pgd_step_size={self.pgd_step_size:.4g}, "
+            f"n_patterns={len(self.patterns_)}"
         )
+
         return
 
 
@@ -338,47 +369,140 @@ class NNMCorrObjective(NNMObjective):
         """
         Gradient of the Mahalanobis loss at X.
 
-        Unweighted:  grad f(X) = R ⊙ [ A^{-1} (R ⊙ (X - Z)) ].
-        Weighted:    grad f(X) = R ⊙ [ L^{-T} (W^2 ⊙ (L^{-1} (R ⊙ (X - Z)))) ].
-
-        The mask is applied before and after A^{-1} to exclude missing entries
-        and suppress leakage from the off-diagonal structure of A^{-1}.
+        Fully observed:  grad f(X) = A^{-1} (X - Z).
+        Missing data:    per-pattern A_O^{-1} applied to observed rows,
+                         zero-lifted at unobserved rows (Eq. 28 of [1]).
         """
         G = self._masked(X - self.Y_)
-        if self.weight_mask_ is None:
-            gx = self.Sigma_inv_ @ G
-        else:
-            gx = self.L_inv_.T @ (np.square(self.weight_mask_) * (self.L_inv_ @ G))
-        return self._masked(gx)
-
-
+        pat0 = self.patterns_[0]
+    
+        # Fast path: fully observed
+        if pat0.obs_idx is None:
+            gx = pat0.Sigma_inv @ G
+            if self.weight_mask_ is not None:
+                gx = pat0.L_inv.T @ (np.square(self.weight_mask_) * (pat0.L_inv @ G))
+            return self._masked(gx)
+    
+        # Exact path: per-pattern submatrix application
+        Gout = np.zeros_like(G)
+        for pat in self.patterns_:
+            block = G[np.ix_(pat.obs_idx, pat.col_idx)]
+            if self.weight_mask_ is not None:
+                W  = self.weight_mask_[np.ix_(pat.obs_idx, pat.col_idx)]
+                Qt = pat.L_inv.T @ (np.square(W) * (pat.L_inv @ block))
+            else:
+                Qt = pat.Sigma_inv @ block # one matmul, not two (L_inv @ L_inv.T @ block)
+            Gout[np.ix_(pat.obs_idx, pat.col_idx)] = Qt
+        return Gout
+    
+    
     def step_denom(self, D):
         """
-        Line-search denominator  || W ⊙ L^{-1} (R ⊙ D) ||_F^2.
+        Line-search denominator.
+    
+        Fully observed:  || L^{-1} D ||_F^2.
+        Missing data:    sum over patterns || L_O^{-1} D_{O, I_O} ||_F^2
         """
-        Dm = self._masked(D)
-        Qt = self.L_inv_ @ Dm
-        if self.weight_mask_ is not None:
-            Qt = self.weight_mask_ * Qt
-        return float(np.linalg.norm(Qt, 'fro') ** 2)
-
-
+        Dm   = self._masked(D)
+        pat0 = self.patterns_[0]
+    
+        # Fast path: fully observed
+        if pat0.obs_idx is None:
+            Qt = pat0.L_inv @ Dm
+            if self.weight_mask_ is not None:
+                Qt = self.weight_mask_ * Qt
+            return float(np.linalg.norm(Qt, 'fro') ** 2)
+            #return self.squared_frobenius_norm(Qt)
+    
+        # Exact path: per-pattern submatrix application
+        total = 0.0
+        for pat in self.patterns_:
+            block = Dm[np.ix_(pat.obs_idx, pat.col_idx)]
+            Qt    = pat.L_inv @ block
+            if self.weight_mask_ is not None:
+                Qt = self.weight_mask_[np.ix_(pat.obs_idx, pat.col_idx)] * Qt
+            total += float(np.linalg.norm(Qt, 'fro') ** 2)
+            #total += self.squared_frobenius_norm(Qt)
+        return total
+    
+    
     def value(self, X):
         """
-        Mahalanobis loss  f(X) = (1/2) * || L^{-1} (R ⊙ (Z - X)) ||_F^2.
+        Mahalanobis loss.
+    
+        Fully observed:  f(X) = (1/2) || L^{-1} (Z - X) ||_F^2.
+        Missing data:    f(X) = (1/2) sum_O || L_O^{-1} (Z - X)_{O, I_O} ||_F^2
         """
-        R = self._masked(self.Y_ - X)
-        R = self.L_inv_ @ R
-        if self.weight_mask_ is not None:
-            R = self.weight_mask_ * R
-        return float(0.5 * np.linalg.norm(R, 'fro') ** 2)
-
-
+        R    = self._masked(self.Y_ - X)
+        pat0 = self.patterns_[0]
+    
+        # Fast path: fully observed
+        if pat0.obs_idx is None:
+            Qt = pat0.L_inv @ R
+            if self.weight_mask_ is not None:
+                Qt = self.weight_mask_ * Qt
+            return float(0.5 * np.linalg.norm(Qt, 'fro') ** 2)
+            #return 0.5 * self.squared_frobenius_norm(Qt)
+    
+        # Exact path: per-pattern submatrix application
+        total = 0.0
+        for pat in self.patterns_:
+            block = R[np.ix_(pat.obs_idx, pat.col_idx)]
+            Qt    = pat.L_inv @ block
+            if self.weight_mask_ is not None:
+                Qt = self.weight_mask_[np.ix_(pat.obs_idx, pat.col_idx)] * Qt
+            total += float(0.5 * np.linalg.norm(Qt, 'fro') ** 2)
+            #total += 0.5 * self.squared_frobenius_norm(Qt)
+        return total
+    
+    
     @property
     def pgd_step_size(self):
-        """
-        PGD step size  eta = lambda_min(A) = 1 / lambda_max(A^{-1}).
-
-        When A = I this recovers eta = 1.
-        """
         return self.pgd_step_size_
+
+
+    def _build_patterns(self, mask):
+        """
+        Precompute all missingness patterns and their submatrix factors.
+    
+        Returns a list of PatternBlock objects, one per distinct pattern.
+        When mask is None, returns a single sentinel with obs_idx=None
+        signalling the fast global path.
+        """
+        if mask is None:
+            return [PatternBlock(
+                obs_idx = None,
+                col_idx = None,
+                L_inv   = self.cov_op_.L_inv_,
+                Sigma_inv = self.cov_op_.Sigma_inv_,
+                lam_min = self.cov_op_.pgd_step_size_,
+            )]
+    
+        observed = ~mask                              # True at observed entries
+        n, p     = observed.shape
+    
+        pattern_map = {}                              # frozenset -> list of col indices
+        for i in range(p):
+            key = frozenset(np.where(observed[:, i])[0])
+            if key not in pattern_map:
+                pattern_map[key] = []
+            pattern_map[key].append(i)
+    
+        blocks = []
+        for key, cols in pattern_map.items():
+            if len(key) == 0:          # all-missing column group — skip entirely
+                continue
+            obs = np.array(sorted(key), dtype=int)
+            A_O     = self.cov_op_.A_[np.ix_(obs, obs)]
+            L_O     = np.linalg.cholesky(A_O)
+            L_O_inv = np.linalg.solve(L_O, np.eye(len(obs)))
+            Sigma_inv = L_O_inv.T @ L_O_inv
+            lam_min = float(np.linalg.eigvalsh(A_O).min())
+            blocks.append(PatternBlock(
+                obs_idx = obs,
+                col_idx = np.array(cols, dtype=int),
+                L_inv   = L_O_inv,
+                Sigma_inv = Sigma_inv,
+                lam_min = lam_min,
+            ))
+        return blocks

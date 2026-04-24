@@ -1,5 +1,5 @@
 """
-covariance_operator.py
+noise_cov_op.py
 ----------------------
 Runtime operator for the sampling covariance matrix used by NNM-Corr.
 
@@ -8,18 +8,9 @@ a validated SamplingCovariance instance and caches the decompositions needed
 by NNMCorrObjective: the Cholesky factor L, its inverse L_inv, the full
 inverse Sigma_inv = A^{-1}, and the eigenvalues of A.
 
-It also provides lazy per-pattern submatrix Cholesky factors for the
-exact correlated-missingness formulation (Section 4.2 of [1]), populated
-on first request and reused thereafter.
-
 Users never interact with this class directly.  It is constructed once
 inside NNMCorrObjective.__init__ and lives for the lifetime of the
 objective.
-
-References
-----------
-.. [1] Banerjee et al. (2025).  Convex approaches to isolate the shared and
-       distinct genetic structures of subphenotypes.  medRxiv 2025.04.15.
 """
 # Author: Saikat Banerjee
 # License: BSD 3 clause
@@ -60,11 +51,6 @@ class NoiseCovarianceOperator:
     pgd_step_size_ : float
         PGD step size  eta = lambda_min(A) = 1 / lambda_max(A^{-1}).
 
-    Notes
-    -----
-    Submatrix Cholesky factors for exact correlated-missingness patterns
-    are computed lazily via submatrix_chol() and
-    cached in _submatrix_cache_.
     """
 
     def __init__(self, noise_cov):
@@ -81,11 +67,6 @@ class NoiseCovarianceOperator:
 
         # PGD step size: eta = lambda_min(A) = 1 / lambda_max(A^{-1})
         self.pgd_step_size_ = float(self.eigvals_.min())
-
-        # Lazy cache for per-pattern submatrix Cholesky factors
-        # key: frozenset of observed trait indices
-        # value: (L_O, L_O_inv) for the submatrix A[O, O]
-        self._submatrix_cache_ = {}
 
         _logger.debug(
             f"CovarianceOperator: n={A.shape[0]}, "
@@ -109,54 +90,3 @@ class NoiseCovarianceOperator:
     def pgd_step_size(self):
         """PGD step size eta = lambda_min(A)."""
         return self.pgd_step_size_
-
-
-    # ------------------------------------------------------------------
-    # Submatrix Cholesky (lazy, for exact correlated missingness)
-    # ------------------------------------------------------------------
-
-    def submatrix_chol(self, pattern):
-        """
-        Return the Cholesky factor and its inverse for the submatrix of A
-        indexed by the observed-trait pattern.
-
-        The result is cached on first call and reused on subsequent calls
-        for the same pattern.
-
-        Parameters
-        ----------
-        pattern : frozenset of int
-            Set of observed trait indices  O ⊆ {0, ..., n-1}.
-
-        Returns
-        -------
-        L_O : np.ndarray [shape (|O|, |O|)]
-            Lower Cholesky factor of A[O, O].
-
-        L_O_inv : np.ndarray [shape (|O|, |O|)]
-            Inverse of L_O.
-
-        Raises
-        ------
-        np.linalg.LinAlgError
-            If A[O, O] is not positive definite.  This signals a QC
-            issue: the observed-trait submatrix is ill-conditioned,
-            typically because a trait is observed at very few SNPs
-            (Section 4.2 of [1]).
-        """
-        if pattern in self._submatrix_cache_:
-            return self._submatrix_cache_[pattern]
-
-        idx   = sorted(pattern)
-        A_O   = self.A_[np.ix_(idx, idx)]
-        L_O   = np.linalg.cholesky(A_O)
-        L_O_inv = np.linalg.solve(L_O, np.eye(len(idx)))
-
-        _logger.debug(
-            f"CovarianceOperator.submatrix_chol: "
-            f"|O|={len(idx)}, "
-            f"lambda_min(A_O)={np.linalg.eigvalsh(A_O).min():.4g}"
-        )
-
-        self._submatrix_cache_[pattern] = (L_O, L_O_inv)
-        return L_O, L_O_inv
