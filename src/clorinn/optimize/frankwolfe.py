@@ -4,7 +4,7 @@
 import numpy as np
 import time
 import logging
-from .objectives import NNMObjective, NNMSparseObjective, NNMCorrObjective
+from .objectives import make_objective
 from .svd import nuclear_norm_oracle
 from .projections import EuclideanProjection
 from .result import History, FitResult
@@ -133,41 +133,6 @@ class FrankWolfe():
         return self.obj_
 
 
-    # ------------------------------------------------------------------
-    # Objective factory
-    # ------------------------------------------------------------------
- 
-    def _make_objective(self, Y, radius, sparse_scale, mask, weight, noise_cov):
-        """
-        Construct and return the objective instance for the requested model.
- 
-        For 'nnm-sparse', r may be a (r_nuc, l1_multiplier) tuple or a
-        scalar (l1_multiplier defaults to 1.0).
-        """
-        if self.model_ == 'nnm':
-            return NNMObjective(Y, radius, mask = mask, weight = weight)
- 
-        elif self.model_ == 'nnm-sparse':
-            l1_mult = 1.0 if sparse_scale is None else sparse_scale
-            return NNMSparseObjective(
-                Y, radius, l1_mult,
-                mask = mask, weight = weight,
-                simplex_method = self.cfg_.simplex_method,
-            )
- 
-        elif self.model_ == 'nnm-corr':
-            return NNMCorrObjective(
-                Y, radius, noise_cov,
-                mask = mask, weight = weight,
-            )
- 
-        else:
-            raise ValueError(
-                f"Unknown model '{self.model_}'. "
-                "Choose from 'nnm', 'nnm-sparse', 'nnm-corr'."
-            )
- 
- 
     # ------------------------------------------------------------------
     # SVD budget
     # ------------------------------------------------------------------
@@ -552,28 +517,34 @@ class FrankWolfe():
         radius : float
             Nuclear norm constraint radius.
 
-        sparse_scale: float, default=1.0
+        sparse_scale: float or None
             Multiplier to determine the threshold sparse radius (constraint on 
-            l1 norm). Used for model='nnm-sparse'.
+            l1 norm). Used for model='nnm-sparse'. Defaults to 1.0 if None.
 
-        weight : (optional) np.ndarray [size (n, p); dtype: float], default=None
-            An array of weights for each element in the input matrix Y.
+        weight : np.ndarray [size (n, p); dtype: float] or None
+            An array of weights for each element in the input matrix.
+            None means unweighted.
 
-        mask : (optional) np.ndarray [size (n, p); dtype: boolean], default=None
+        mask : np.ndarray [size (n, p); dtype: boolean] or None
             An array of masks to hide specific elements in the input matrix Y.
             True for entries to exclude. Internally, it is combined with 
             all NaN entries.
 
-        X0 : (optional) np.ndarray [size (n, p); dtype: float], default=None
+        X0 : np.ndarray [size (n, p); dtype: float] or None
             Optional initial guess for the low rank matrix in the FW algorithm. 
-            Defaults to zeros.
+            Defaults to zeros if None.
 
-        noise_cov : np.ndarray [size (n, n); dtype: float], default=None
-            Sampling covariance matrix A. Required for model='nnm-corr'.
-            Must be created / validated from SamplingCovariance, e.g.:
-                A = SamplingCovariance.from_matrix(raw_cov_from_ldsc)
-                A = SamplingCovariance.from_ldsc(...)
+        noise_cov : SamplingCovariance
+                    or np.ndarray [size (n, n); dtype: float] or None
+            SamplingCovariance object. Required for model='nnm-corr'.
+            If input is np.ndarray, it is automatically passed through
+                A = SamplingCovariance.from_matrix(noise_cov)
+            See `utils/sampling_covariance.py`.
 
+        Returns
+        -------
+        self: FrankWolfe
+            Fitted instance. Access the result via ``result''.
 
         Note
         ----
@@ -584,25 +555,30 @@ class FrankWolfe():
         -----
             model = FrankWolfe(<params>)
             model.fit(Y, r, ...)
+            result = model.result
         '''
 
         self.logger_.debug(f"Model = {self.model_}")
         self.logger_.debug(f"Shape of input data = {Y.shape}")
 
         # ---------------------
-        # Validations
+        # Validate
         # ---------------------
         if self.model_ == 'nnm-corr' and noise_cov is None:
             raise ValueError(
                 "model='nnm-corr' requires a covariance argument. "
                 "Construct one via SamplingCovariance.from_matrix(A)."
             )
-            if isinstance(noise_cov, np.ndarray): noise_cov = SamplingCovariance.from_matrix(noise_cov)
+        if isinstance(noise_cov, np.ndarray): 
+            noise_cov = SamplingCovariance.from_matrix(noise_cov)
 
         # ---------------------
         # Build objective
         # ---------------------
-        self.obj_ = self._make_objective(Y, radius, sparse_scale, mask, weight, noise_cov)
+        self.obj_ = make_objective(self.model_, Y, radius,
+            sparse_scale = sparse_scale,
+            mask = mask, weight = weight, noise_cov = noise_cov,
+            simplex_method = self.cfg_.simplex_method)
 
         self.logger_.debug(
             f"Masked entries = {np.sum(self.obj_.mask_) if self.obj_.mask_ is not None else 0}"
@@ -687,6 +663,16 @@ class FrankWolfe():
             loss_low_rank = fl_hist if self.model_ == 'nnm-sparse' else None,
         )
 
+        metrics = {
+            'nuclear_norm': float(np.linalg.norm(iter_state.X, 'nuc')),
+            'radius' : radius,
+        }
+
+        if self.model_ == 'nnm-sparse':
+            metrics['l1_norm'] = float(np.sum(np.abs(iter_state.M)))
+            metrics['l1_threshold'] = float(self.obj_.l1_threshold_)
+            metrics['sparse_scale'] = sparse_scale
+
         self.result_  = FitResult(
             X           = iter_state.X,
             M           = iter_state.M if self.model_ == 'nnm-sparse' else None,
@@ -695,14 +681,7 @@ class FrankWolfe():
             converged   = iter_state.stop_reason != StopReason.MAX_ITER,
             stop_reason = iter_state.stop_reason,
             message     = iter_state.stop_reason.message,
-            metrics     = {
-                'nuclear_norm': float(np.linalg.norm(iter_state.X, 'nuc')),
-                #'l1_norm': float(np.linalg.norm(iter_state.M, 1)) if self.model_ == 'nnm-sparse' else None,
-                'l1_norm': float(np.sum(np.abs(iter_state.M))) if self.model_ == 'nnm-sparse' else None,
-                'radius' : radius,
-                'sparse_scale' : sparse_scale,
-                'l1_threshold' : self.obj_.l1_threshold_ if self.model_ == 'nnm-sparse' else None,
-            },
+            metrics     = metrics,
         )
 
         return self

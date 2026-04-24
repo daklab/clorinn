@@ -202,8 +202,9 @@ class _PGDRegressionBase(unittest.TestCase):
                          bool(self.f['converged_in_interior']))
 
     def test_history_length(self):
-        """fx has length n_iter (no step-0 entry in PGD)."""
-        self.assertEqual(len(self.pgd.history.loss), int(self.f['n_iter']))
+        """fx has length n_iter + 1."""
+        expected = int(self.f['n_iter']) + 1
+        self.assertEqual(len(self.pgd.history.loss), expected)
 
 
 # ---------------------------------------------------------------------------

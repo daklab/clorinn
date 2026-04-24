@@ -506,3 +506,36 @@ class NNMCorrObjective(NNMObjective):
                 lam_min = lam_min,
             ))
         return blocks
+
+
+
+# ------------------------------------------------------------------
+# Objective factory
+# ------------------------------------------------------------------
+def make_objective(model, Y, radius, sparse_scale=None, mask=None,
+                   weight=None, noise_cov=None, simplex_method='sort'):
+    """
+    Construct and return the objective instance for the requested model.
+    """
+    if model == 'nnm':
+        return NNMObjective(Y, radius, mask = mask, weight = weight)
+
+    elif model == 'nnm-sparse':
+        l1_mult = 1.0 if sparse_scale is None else sparse_scale
+        return NNMSparseObjective(
+            Y, radius, l1_mult,
+            mask = mask, weight = weight,
+            simplex_method = simplex_method,
+        )
+
+    elif model == 'nnm-corr':
+        return NNMCorrObjective(
+            Y, radius, noise_cov,
+            mask = mask, weight = weight,
+        )
+
+    else:
+        raise ValueError(
+            f"Unknown model '{model}'. "
+            "Choose from 'nnm', 'nnm-sparse', 'nnm-corr'."
+        )

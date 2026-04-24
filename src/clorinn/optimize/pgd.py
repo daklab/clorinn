@@ -2,31 +2,33 @@
 # License: BSD 3 clause
 
 import numpy as np
-from .objectives import NNMObjective
+from .objectives import make_objective
 from .projections import NuclearNormProjection
 from .result import History, FitResult
 from .state import StopReason
 from ..utils.logs import get_loglevel, CustomLogger
+from ..utils.sampling_covariance import SamplingCovariance 
 
-class PGDWarmStart():
+class ProjectedGradientDescent():
     """
-    Adaptive projected gradient descent for warm-starting Frank-Wolfe
-    on the nuclear-norm-constrained matrix completion problem.
+    Projected gradient descent algorithm for low rank matrix 
+    approximation problem / matrix completion problem
+    using constraints on nuclear norm and/or l1 norm of the matrix.
 
-    Solves
- 
-        min   f(X)
-        s.t.  ||X||_* <= r
- 
-    where f(X) is the objective defined by an NNMObjective. PGD iterates until 
-    either
-        (a) the nuclear norm constraint becomes active (projection clips),
-            at which point Frank-Wolfe's rank-1 updates are more natural, or
-        (b) the objective stalls, meaning the solution lies in the interior
-            and FW will confirm convergence via the duality gap.
+    Solves three problem variants depending on ``model'':
+    'nnm', 'nnm-sparse' and 'nnm-corr'.
+
+    PGD can be used standalone or as a warm start for Frank-Wolfe / AFW.
+    As a warm start, include ``'boundary_active'`` in ``stop_criteria`` so
+    that PGD halts as soon as the nuclear norm constraint becomes active and
+    returns control to the caller.
  
     Parameters
     ----------
+    model : str, default='nnm'
+        Problem variant.  One of ``'nnm'``, ``'nnm-sparse'``,
+        ``'nnm-corr'``.
+
     max_iter : integer, default=50
         Maximum number of PGD iterations.
  
@@ -36,7 +38,26 @@ class PGDWarmStart():
     simplex_method : string, default='sort'
         Algorithm for the simplex sub-projection inside the nuclear norm
         ball projection. See EuclideanProjection for available options.
- 
+
+    stop_criteria : tuple of str, default=('relative_loss',)
+        Stopping criteria to check at each iteration.  The solver halts
+        at the first criterion that is satisfied.  Recognised values:
+    
+            'relative_loss'    Stop when the relative change in the
+                               objective falls below rel_tol.  Indicates
+                               convergence in the interior of the nuclear
+                               norm ball.
+            'boundary_active'  Stop when the nuclear norm projection clips
+                               the singular values, i.e. ||X||_* = r.
+                               Signals that the constraint is active and
+                               the iterate is ready to be handed off to a
+                               Frank-Wolfe solver.
+    
+        Pass an empty tuple to run for exactly max_iter iterations
+        regardless of convergence.  For use as a warm start, include
+        'boundary_active' so that PGD stops as soon as the boundary is
+        reached and control is returned to the caller.
+
     print_skip : integer, default=None
         Number of steps skipped between each printed step
         if `verbose = 1`.
@@ -53,14 +74,19 @@ class PGDWarmStart():
         Higher values are treated as 2.
     """
  
-    def __init__(self, max_iter = 50, rel_tol = 1e-6,
+    def __init__(self,
+                 model = 'nnm',
+                 max_iter = 50, rel_tol = 1e-6,
                  simplex_method = 'sort',
+                 stop_criteria=('relative_loss',),
                  print_skip = None,
                  verbose = 1):
+        self.model_          = model
         self.max_iter_       = max_iter
         self.rel_tol_        = rel_tol
         self.simplex_method_ = simplex_method
-        self.prog_step_skip_     = print_skip
+        self.stop_criteria_  = tuple(stop_criteria)
+        self.prog_step_skip_ = print_skip
 
         self.prog_step_skip_ = print_skip
         if verbose > 0 and self.prog_step_skip_ is None:
@@ -78,62 +104,142 @@ class PGDWarmStart():
  
     @property
     def result(self):
-        return self.result_
- 
- 
-    def fit(self, Y, radius, mask = None, weight = None, noise_cov = None):
         """
-        Run PGD warm start.
+        FitResult from the most recent fit() call.
+        """
+        return self.result_
+
+    @property
+    def objective(self):
+        """
+        Objective instance constructed during fit().
+        """
+        return self.obj_
+ 
+ 
+    def fit(self, Y, radius,
+        sparse_scale = None,
+        mask = None, weight = None, 
+        X0 = None,
+        noise_cov = None):
+        """
+        Run projected gradient descent.
  
         Parameters
         ----------
         Y : np.ndarray [size (n, p); dtype: float]
-            Input data matrix (NaN values should already be replaced by 0).
+            Input data matrix. NaN values are replaced by zero internally.
  
         radius : float
-            Nuclear norm radius.
+            Nuclear norm constraint radius r.
+
+        sparse_scale : float or None
+            Multiplier to determine the constraint on l1 norm. 
+            Used for model='nnm-sparse'. Defaults to 1.0 if None.
  
         mask : np.ndarray [size (n, p); dtype: bool] or None
-            True for entries to ignore (NaN or held out).
+            True for entries to exlcude from the loss (missing or held out).
  
         weight : np.ndarray [size (n, p); dtype: float] or None
-            Per-element weights.
+            Per-element weights. None means unweighted.
 
-        noise_cov : np.ndarray [size (n, n); dtype: float], default=None
-            Sampling covariance matrix A. Required for model='nnm-corr'.
-            Must be created / validated from SamplingCovariance, e.g.:
-                A = SamplingCovariance.from_matrix(raw_cov_from_ldsc)
-                A = SamplingCovariance.from_ldsc(...)
+        X0 : np.ndarray [size (n, p); dtype: float] or None
+            Optional initial guess for the low rank matrix in the PGD algorithm.
+            Defaults to zeros if None.
+
+        noise_cov : SamplingCovariance 
+                    or np.ndarray [size (n, n); dtype: float] or None 
+            SamplingCovariance object. Required for model='nnm-corr'.
+            If input is np.ndarray, it is automatically converted to
+            SamplingCovariance object
+                A = SamplingCovariance.from_matrix(noise_cov)
+            See `utils/sampling_covariance.py`.
  
         Returns
         -------
-        self: PGDWarmStart
-            Fitted instance. Access the result via properties.
+        self: ProjectedGradientDescent
+            Fitted instance. Access the result via ``result''.
+
+        Note
+        ----
+        Any NaN value in the input matrix is automatically added to `mask`.
+
+
+        Usage
+        -----
+            model = ProjectedGradientDescent(<params>)
+            model.fit(Y, r, ...)
+            result = model.result
         """
-        obj = NNMObjective(Y, radius, mask = mask, weight = weight)
-        eta = obj.pgd_step_size
 
+        self.logger_.debug(f"Model = {self.model_}")
+        self.logger_.debug(f"Shape of input data = {Y.shape}")
+
+        # ---------------------
+        # Validate
+        # ---------------------
+        if self.model_ == 'nnm-corr' and noise_cov is None:
+            raise ValueError(
+                "model='nnm-corr' requires noise_cov. "
+                "Pass a covariance matrix or a SamplingCovariance instance."
+            )
+        if isinstance(noise_cov, np.ndarray):
+            noise_cov = SamplingCovariance.from_matrix(noise_cov)
+
+        # ---------------------
+        # Build objective
+        # ---------------------
+        self.obj_ = make_objective(self.model_, Y, radius, 
+            sparse_scale = sparse_scale, 
+            mask = mask, weight = weight, noise_cov = noise_cov,
+            simplex_method = self.simplex_method_)
+
+        self.logger_.debug(
+            f"Masked entries = {np.sum(self.obj_.mask_) if self.obj_.mask_ is not None else 0}"
+        )
+
+        # ---------------------
+        # Initialize iterates
+        # ---------------------
+        eta = self.obj_.pgd_step_size
         projector = NuclearNormProjection(simplex_method = self.simplex_method_)
-        X = np.zeros_like(obj.Y_)
-        fx_old = np.inf
-        fx_hist = []
-        converged_interior = False
+
+        X = np.zeros_like(self.obj_.Y_) if X0 is None else X0.copy()
+        M = self.obj_.project_sparse(X) if self.model_ == 'nnm-sparse' else None
+
+        # ---------------------
+        # Initialize history
+        # ---------------------
+        fx_old = self.obj_.value(X) if M is None else self.obj_.value(X + M)
+        fx_hist = [fx_old]
         stop_reason = StopReason.MAX_ITER
+        converged = False
+        n_iter = 0
  
-        for t in range(self.max_iter_):
+        # ---------------------
+        # Steps 1, ..., max_iter
+        # ---------------------
+        for i in range(self.max_iter_):
 
-            n_iter = t + 1
+            n_iter += 1
 
-            fx = obj.value(X)
-            fx_hist.append(fx)
-
-            G = obj.gradient(X)
+            # ---- Gradient step on X ----
+            G = self.obj_.gradient(X) if M  is None else self.obj_.gradient(X+M)
             X_candidate = X - eta * G
 
-            # Project onto nuclear norm ball
+            # ---- Project X onto nuclear norm ball ----
             projector.fit(X_candidate, radius)
             X = projector.proj
- 
+
+            # ---- Exact sparse update for NNM-Sparse (Algorithm 7) ----
+            if M is not None:
+                M = self.obj_.project_sparse(X)
+
+            # ---- Evaluate objective ----
+            fx = self.obj_.value(X) if M is None else self.obj_.value(X + M)
+            fx_hist.append(fx)
+
+            # ---- Progress logging ----
             if self.prog_step_skip_ is not None:
                 if (n_iter == 1) or (n_iter % self.prog_step_skip_ == 0):
                     nuc = projector.nuclear_norm_after_
@@ -143,18 +249,18 @@ class PGDWarmStart():
                         f"||X||_* = {nuc:.1f}  ({tag})"
                     )
 
-            # Stop if projection clipped: constraint is active, hand off to FW
-            # if projector.is_clipped:
-            #     if self.prog_step_skip_ is not None:
-            #         self.logger_.info(
-            #             f"PGD iter {self.n_iter_:4d}  Nuclear norm constraint active "
-            #             f"({projector.nuclear_norm_before_:.1f} -> {r:.1f}). "
-            #             f"Handing off to FW."
-            #         )
-            #     break
+            # ---- Stopping: boundary active ----
+            if 'boundary_active' in self.stop_criteria_ and projector.is_clipped:
+                self.logger_.info(
+                    f"PGD iter {n_iter:4d}  Nuclear norm constraint active "
+                    f"({projector.nuclear_norm_before_:.1f} = r = {radius:.1f}). "
+                    f"Handing off to FW."
+                )
+                stop_reason = StopReason.BOUNDARY_ACTIVE
+                break
  
-            # Stop if objective stalled: converged in interior
-            if t > 0 and np.isfinite(fx_old):
+            # ---- Stopping: relative loss ----
+            if 'relative_loss' in self.stop_criteria_ and i > 0 and np.isfinite(fx_old):
                 rel = abs(fx - fx_old) / max(1.0, abs(fx_old))
                 if rel < self.rel_tol_:
                     if self.prog_step_skip_ is not None:
@@ -164,22 +270,37 @@ class PGDWarmStart():
                             f"(||X||_* = {nuc:.1f} < r = {radius:.1f})"
                         )
                     stop_reason = StopReason.RELATIVE_LOSS
-                    converged_interior = True
+                    converged = True
                     break
  
             fx_old = fx
 
+        # ---------------------
+        # Assemble result
+        # ---------------------
+        history = History(
+            loss = fx_hist,
+        )
+
+        metrics = {
+            'nuclear_norm': float(np.linalg.norm(X, 'nuc')),
+            'radius' : radius,
+        }
+
+        if self.model_ == 'nnm-sparse':
+            metrics['l1_norm'] = float(np.sum(np.abs(M)))
+            metrics['l1_threshold'] = float(self.obj_.l1_threshold_)
+            metrics['sparse_scale'] = sparse_scale
+
         self.result_  = FitResult(
-            X         = X,
-            history   = History(loss = fx_hist),
-            n_iter    = n_iter,
+            X           = X,
+            M           = M,
+            history     = history,
+            n_iter      = n_iter,
+            converged   = converged,
             stop_reason = stop_reason,
-            converged = converged_interior,
-            message   = 'Converged in interior' if converged_interior else 'Max iterations',
-            metrics   = {
-                'nuclear_norm': float(np.linalg.norm(X, 'nuc')),
-                'radius': radius,
-                },
+            message     = stop_reason.message,
+            metrics     = metrics,
         )
 
         return self

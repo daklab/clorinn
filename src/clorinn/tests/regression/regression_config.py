@@ -24,6 +24,7 @@ PGD_CONFIG = dict(
     max_iter=50,
     rel_tol=1e-8,
     verbose=0,
+    stop_criteria=('relative_loss',),
 )
 
 # Constraints

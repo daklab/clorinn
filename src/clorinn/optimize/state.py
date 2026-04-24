@@ -10,6 +10,7 @@ class StopReason(Enum):
     STEP_SIZE     = auto()
     RELATIVE_LOSS = auto()
     RELATIVE_DG   = auto()
+    BOUNDARY_ACTIVE = auto()
 
 
     @property
@@ -20,6 +21,7 @@ class StopReason(Enum):
             self.STEP_SIZE:     "Step size converged below tolerance.",
             self.RELATIVE_LOSS: "Relative change in loss fn converged below tolerance.",
             self.RELATIVE_DG:   "Relative change in duality gap converged below tolerance.",
+            self.BOUNDARY_ACTIVE: "Nuclear norm constraint active. Ready for Frank-Wolfe."
         }
         return stop_messages[self]
 
