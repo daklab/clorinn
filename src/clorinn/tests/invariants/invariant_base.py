@@ -165,7 +165,7 @@ class FWSparseInvariantBase(FWInvariantBase):
 
 class PGDInvariantBase(unittest.TestCase):
     """
-    Invariant checks for the PGD warm-start solver.
+    Invariant checks for the PGD solver.
 
     PGD does not compute a duality gap and uses a fixed step size
     eta = 1/Lf, so those checks are absent here.
@@ -209,3 +209,31 @@ class PGDInvariantBase(unittest.TestCase):
             f"Max increase: {diffs[violations].max():.3g} at steps {violations}."
         ) if len(violations) > 0 else ""
         self.assertEqual(len(violations), 0, msg=msg)
+
+
+# ---------------------------------------------------------------------------
+# PGD sparse extension
+# ---------------------------------------------------------------------------
+
+class PGDSparseInvariantBase(PGDInvariantBase):
+    """
+    Extends PGDInvariantBase with the l1 feasibility check for NNM-Sparse.
+
+    Subclasses must additionally set in setUpClass:
+        cls.l1_threshold : float   (scaled l1 constraint radius)
+    """
+
+    l1_threshold = None
+
+    @classmethod
+    def setUpClass(cls):
+        if cls.result is None:
+            raise unittest.SkipTest("base class")
+
+    def test_l1_norm_feasibility(self):
+        """||M||_1 <= l1_threshold at the converged iterate."""
+        l1 = np.sum(np.abs(self.result.M))
+        self.assertLessEqual(
+            l1, self.l1_threshold + _FEAS_TOL,
+            msg=f"||M||_1 = {l1:.6g} > l1_threshold = {self.l1_threshold:.6g}",
+        )

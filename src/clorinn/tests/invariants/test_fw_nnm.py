@@ -15,7 +15,6 @@ Running
 # Author: Saikat Banerjee
 # License: BSD 3 clause
 
-import logging
 import unittest
 
 from clorinn.optimize import FrankWolfe
@@ -33,7 +32,7 @@ class TestFWNNMFull(FWInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__, level=logging.INFO)
+        cls.logger_ = CustomLogger(__name__)
         cls.logger_.info("Setting up FW / NNM / full invariant tests")
         prob = _build_problem()
         m = FrankWolfe(model='nnm', **FW_CONFIG)
@@ -51,7 +50,7 @@ class TestFWNNMMask(FWInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__, level=logging.INFO)
+        cls.logger_ = CustomLogger(__name__)
         cls.logger_.info("Setting up FW / NNM / mask invariant tests")
         prob = _build_problem()
         m = FrankWolfe(model='nnm', **FW_CONFIG)

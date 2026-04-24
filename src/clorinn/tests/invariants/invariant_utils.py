@@ -40,6 +40,7 @@ FW_CONFIG = dict(
 PGD_CONFIG = dict(
     max_iter        = 50,
     rel_tol         = 1e-8,
+    stop_criteria   = ('relative_loss',),
     verbose         = 0,
 )
 
