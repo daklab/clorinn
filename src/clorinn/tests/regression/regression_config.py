@@ -19,7 +19,7 @@ FW_CONFIG = dict(
     verbose=0,
 )
 
-# PGDWarmStart kwargs
+# ProjectedGradientDescent kwargs
 PGD_CONFIG = dict(
     max_iter=50,
     rel_tol=1e-8,

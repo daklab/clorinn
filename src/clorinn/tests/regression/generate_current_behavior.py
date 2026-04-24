@@ -10,9 +10,9 @@ bit-for-bit identical results.
 Usage
 -----
     pip install -e . --no-build-isolation
-    python -m clorinn.tests.generate_current_behavior
+    python -m clorinn.tests.regression.generate_current_behavior
 
-Fixture files are written to src/clorinn/tests/fixtures/.
+Fixture files are written to src/clorinn/tests/regression/fixtures/.
 
 Re-run only when you intentionally change solver behavior. Commit the
 updated .npz files alongside the code change so the diff documents what
@@ -41,21 +41,24 @@ with the test file, so there is a single source of truth.
   steps         float64 (n_iter+1,)
   n_iter        int64   scalar
 
-  Inputs / Outputs (PGDWarmStart)
+  Inputs / Outputs (ProjectedGradientDescent)
   --------------------------------
   Y             float64 (n, p)
-  r             float64 scalar
+  radius        float64 scalar
   mask          bool    (n, p)    [omitted when not used]
+  A             float64 (n, n)    [nnm-corr only]
+  sparse_scale  float64 scalar    [nnm-sparse only]
   X             float64 (n, p)
+  M             float64 (n, p)    [nnm-sparse only]
   fx            float64 (n_iter,)
   n_iter        int64   scalar
-  converged_in_interior  bool scalar
+  converged     bool    scalar
 """
 
 import os
 import numpy as np
 
-from clorinn.optimize import FrankWolfe, PGDWarmStart
+from clorinn.optimize import FrankWolfe, ProjectedGradientDescent
 from clorinn.tests import toy_data
 from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
 from clorinn.utils import SamplingCovariance
@@ -180,29 +183,88 @@ def gen_nnm_corr_mask(prob):
     )
 
 
-def gen_pgd(prob):
+def gen_pgd_nnm(prob):
     """TC7: PGD warm start, fully observed."""
-    pgd = PGDWarmStart(**PGD_CONFIG)
+    pgd = ProjectedGradientDescent(**PGD_CONFIG)
     pgd.fit(prob['Y'], radius=R_NUC)
     _save(
-        os.path.join(FIXTURES_DIR, 'pgd.npz'),
+        os.path.join(FIXTURES_DIR, 'pgd_nnm.npz'),
         Y=prob['Y'], radius=np.float64(R_NUC),
         X=pgd.result.X, fx=np.array(pgd.result.history.loss),
         n_iter=np.int64(pgd.result.n_iter),
-        converged_in_interior=np.bool_(pgd.result.converged),
+        converged=np.bool_(pgd.result.converged),
     )
 
 
-def gen_pgd_mask(prob):
+def gen_pgd_nnm_mask(prob):
     """TC8: PGD warm start, 10 % missing data."""
-    pgd = PGDWarmStart(**PGD_CONFIG)
+    pgd = ProjectedGradientDescent(**PGD_CONFIG)
     pgd.fit(prob['Y'], radius=R_NUC, mask=prob['mask'])
     _save(
-        os.path.join(FIXTURES_DIR, 'pgd_mask.npz'),
+        os.path.join(FIXTURES_DIR, 'pgd_nnm_mask.npz'),
         Y=prob['Y'], radius=np.float64(R_NUC), mask=prob['mask'],
         X=pgd.result.X, fx=np.array(pgd.result.history.loss),
         n_iter=np.int64(pgd.result.n_iter),
-        converged_in_interior=np.bool_(pgd.result.converged),
+        converged=np.bool_(pgd.result.converged),
+    )
+
+
+def gen_pgd_nnm_sparse(prob):
+    """TC9: PGD + NNM-Sparse, fully observed."""
+    pgd = ProjectedGradientDescent(model='nnm-sparse', **PGD_CONFIG)
+    pgd.fit(prob['Y'], radius=R_NUC, sparse_scale=L1_MULT)
+    _save(
+        os.path.join(FIXTURES_DIR, 'pgd_nnm_sparse.npz'),
+        Y=prob['Y'], radius=np.float64(R_NUC),
+        sparse_scale=np.float64(L1_MULT),
+        X=pgd.result.X, M=pgd.result.M,
+        fx=np.array(pgd.result.history.loss),
+        n_iter=np.int64(pgd.result.n_iter),
+        converged=np.bool_(pgd.result.converged),
+    )
+
+
+def gen_pgd_nnm_sparse_mask(prob):
+    """TC10: PGD + NNM-Sparse, 10 % missing data."""
+    pgd = ProjectedGradientDescent(model='nnm-sparse', **PGD_CONFIG)
+    pgd.fit(prob['Y'], radius=R_NUC, sparse_scale=L1_MULT, mask=prob['mask'])
+    _save(
+        os.path.join(FIXTURES_DIR, 'pgd_nnm_sparse_mask.npz'),
+        Y=prob['Y'], radius=np.float64(R_NUC),
+        sparse_scale=np.float64(L1_MULT), mask=prob['mask'],
+        X=pgd.result.X, M=pgd.result.M,
+        fx=np.array(pgd.result.history.loss),
+        n_iter=np.int64(pgd.result.n_iter),
+        converged=np.bool_(pgd.result.converged),
+    )
+
+
+def gen_pgd_nnm_corr(prob):
+    """TC11: PGD + NNM-Corr, fully observed."""
+    pgd = ProjectedGradientDescent(model='nnm-corr', **PGD_CONFIG)
+    pgd.fit(prob['Y'], radius=R_NUC, noise_cov=prob['noise_cov'])
+    _save(
+        os.path.join(FIXTURES_DIR, 'pgd_nnm_corr.npz'),
+        Y=prob['Y'], radius=np.float64(R_NUC), A=prob['A'],
+        X=pgd.result.X,
+        fx=np.array(pgd.result.history.loss),
+        n_iter=np.int64(pgd.result.n_iter),
+        converged=np.bool_(pgd.result.converged),
+    )
+
+
+def gen_pgd_nnm_corr_mask(prob):
+    """TC12: PGD + NNM-Corr, 10 % missing data."""
+    pgd = ProjectedGradientDescent(model='nnm-corr', **PGD_CONFIG)
+    pgd.fit(prob['Y'], radius=R_NUC, mask=prob['mask'], noise_cov=prob['noise_cov'])
+    _save(
+        os.path.join(FIXTURES_DIR, 'pgd_nnm_corr_mask.npz'),
+        Y=prob['Y'], radius=np.float64(R_NUC),
+        mask=prob['mask'], A=prob['A'],
+        X=pgd.result.X,
+        fx=np.array(pgd.result.history.loss),
+        n_iter=np.int64(pgd.result.n_iter),
+        converged=np.bool_(pgd.result.converged),
     )
 
 
@@ -214,7 +276,9 @@ GENERATORS = [
     gen_nnm, gen_nnm_mask,
     gen_nnm_sparse, gen_nnm_sparse_mask,
     gen_nnm_corr, gen_nnm_corr_mask,
-    gen_pgd, gen_pgd_mask,
+    gen_pgd_nnm, gen_pgd_nnm_mask,
+    gen_pgd_nnm_sparse, gen_pgd_nnm_sparse_mask,
+    gen_pgd_nnm_corr, gen_pgd_nnm_corr_mask,
 ]
 
 

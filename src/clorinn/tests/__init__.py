@@ -37,7 +37,9 @@ from .regression.test_current_behavior import (
     TestRegressionNNM, TestRegressionNNMMask,
     TestRegressionNNMSparse, TestRegressionNNMSparseMask,
     TestRegressionNNMCorr, TestRegressionNNMCorrMask,
-    TestRegressionPGD, TestRegressionPGDMask,
+    TestRegressionPGDNNM, TestRegressionPGDNNMMask,
+    TestRegressionPGDNNMSparse, TestRegressionPGDNNMSparseMask,
+    TestRegressionPGDNNMCorr, TestRegressionPGDNNMCorrMask,
 )
 
 

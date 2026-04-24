@@ -253,7 +253,7 @@ class ProjectedGradientDescent():
             if 'boundary_active' in self.stop_criteria_ and projector.is_clipped:
                 self.logger_.info(
                     f"PGD iter {n_iter:4d}  Nuclear norm constraint active "
-                    f"({projector.nuclear_norm_before_:.1f} = r = {radius:.1f}). "
+                    f"||X_candidate||_* = ({projector.nuclear_norm_before_:.1f} > r = {radius:.1f}). "
                     f"Handing off to FW."
                 )
                 stop_reason = StopReason.BOUNDARY_ACTIVE

@@ -17,13 +17,13 @@ Updating fixtures
 -----------------
 When you intentionally change solver behavior, regenerate:
 
-    python -m clorinn.tests.generate_current_behavior
+    python -m clorinn.tests.regression.generate_current_behavior
 
 Commit the updated .npz files alongside the code change.
 
 Running
 -------
-    python -m unittest clorinn.tests.test_current_behavior -v
+    python -m unittest clorinn.tests.regression.test_current_behavior -v
 """
 
 import os
@@ -31,7 +31,7 @@ import unittest
 import numpy as np
 
 from clorinn.utils import SamplingCovariance
-from clorinn.optimize import FrankWolfe, PGDWarmStart
+from clorinn.optimize import FrankWolfe, ProjectedGradientDescent
 from clorinn.utils.logs import CustomLogger
 from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
 
@@ -160,11 +160,12 @@ class TestRegressionNNMCorrMask(_FWRegressionBase):
 
 
 # ---------------------------------------------------------------------------
-# PGDWarmStart regression base
+# ProjectedGradientDescent regression base
 # ---------------------------------------------------------------------------
 
 class _PGDRegressionBase(unittest.TestCase):
     fixture_name: str = ''
+    model: str = ''
     rtol: float = 1e-12
     atol: float = 1e-12
 
@@ -174,15 +175,19 @@ class _PGDRegressionBase(unittest.TestCase):
             raise unittest.SkipTest("base class")
 
         cls.logger_ = CustomLogger(__name__)
-        cls.logger_.info(f"[pgd] loading {cls.fixture_name}")
+        cls.logger_.info(f"[pgd/{cls.model}] loading {cls.fixture_name}")
 
         f = _load(cls.fixture_name)
         cls.f = f
 
-        pgd = PGDWarmStart(**PGD_CONFIG)
+        pgd = ProjectedGradientDescent(model=cls.model, **PGD_CONFIG)
         fit_kwargs = dict(radius=float(f['radius']))
         if 'mask' in f:
             fit_kwargs['mask'] = f['mask']
+        if 'A' in f:
+            fit_kwargs['noise_cov'] = SamplingCovariance.from_matrix(f['A'])
+        if 'sparse_scale' in f:
+            fit_kwargs['sparse_scale'] = float(f['sparse_scale'])
         pgd.fit(f['Y'], **fit_kwargs)
         cls.pgd = pgd.result
 
@@ -199,26 +204,63 @@ class _PGDRegressionBase(unittest.TestCase):
 
     def test_converged_in_interior(self):
         self.assertEqual(self.pgd.converged,
-                         bool(self.f['converged_in_interior']))
+                         bool(self.f['converged']))
 
     def test_history_length(self):
         """fx has length n_iter + 1."""
         expected = int(self.f['n_iter']) + 1
         self.assertEqual(len(self.pgd.history.loss), expected)
 
+    def test_M_identical(self):
+        if 'M' not in self.f:
+            self.skipTest("not a sparse fixture")
+        np.testing.assert_allclose(self.pgd.M, self.f['M'],
+                                   rtol=self.rtol, atol=self.atol)
+
+    def test_M_absent_for_non_sparse(self):
+        if 'M' in self.f:
+            self.skipTest("sparse fixture")
+        self.assertIsNone(self.pgd.M)
+
 
 # ---------------------------------------------------------------------------
 # PGD test classes
 # ---------------------------------------------------------------------------
 
-class TestRegressionPGD(_PGDRegressionBase):
+class TestRegressionPGDNNM(_PGDRegressionBase):
     """TC7: PGD warm start, fully observed."""
-    fixture_name = 'pgd.npz'
+    fixture_name = 'pgd_nnm.npz'
+    model        = 'nnm'
 
 
-class TestRegressionPGDMask(_PGDRegressionBase):
+class TestRegressionPGDNNMMask(_PGDRegressionBase):
     """TC8: PGD warm start, 10 % missing data."""
-    fixture_name = 'pgd_mask.npz'
+    fixture_name = 'pgd_nnm_mask.npz'
+    model        = 'nnm'
+
+
+class TestRegressionPGDNNMSparse(_PGDRegressionBase):
+    """TC9: PGD + NNM-Sparse, fully observed."""
+    fixture_name = 'pgd_nnm_sparse.npz'
+    model        = 'nnm-sparse'
+
+
+class TestRegressionPGDNNMSparseMask(_PGDRegressionBase):
+    """TC10: PGD + NNM-Sparse, 10 % missing data."""
+    fixture_name = 'pgd_nnm_sparse_mask.npz'
+    model        = 'nnm-sparse'
+
+
+class TestRegressionPGDNNMCorr(_PGDRegressionBase):
+    """TC11: PGD + NNM-Corr, fully observed."""
+    fixture_name = 'pgd_nnm_corr.npz'
+    model        = 'nnm-corr'
+
+
+class TestRegressionPGDNNMCorrMask(_PGDRegressionBase):
+    """TC12: PGD + NNM-Corr, 10 % missing data."""
+    fixture_name = 'pgd_nnm_corr_mask.npz'
+    model        = 'nnm-corr'
 
 
 # ---------------------------------------------------------------------------
@@ -230,14 +272,16 @@ class TestFixturesPresent(unittest.TestCase):
         'nnm.npz', 'nnm_mask.npz',
         'nnm_sparse.npz', 'nnm_sparse_mask.npz',
         'nnm_corr.npz', 'nnm_corr_mask.npz',
-        'pgd.npz', 'pgd_mask.npz',
+        'pgd_nnm.npz', 'pgd_nnm_mask.npz',
+        'pgd_nnm_sparse.npz', 'pgd_nnm_sparse_mask.npz',
+        'pgd_nnm_corr.npz', 'pgd_nnm_corr_mask.npz',
     ]
 
     def test_fixtures_directory_exists(self):
         self.assertTrue(
             os.path.isdir(FIXTURES_DIR),
             msg=f"Fixtures directory missing: {FIXTURES_DIR}\n"
-                "Run: python -m clorinn.tests.generate_current_behavior",
+                "Run: python -m clorinn.tests.regression.generate_current_behavior",
         )
 
     def test_all_fixture_files_present(self):
@@ -246,5 +290,5 @@ class TestFixturesPresent(unittest.TestCase):
         self.assertEqual(
             missing, [],
             msg=f"Missing fixtures: {missing}\n"
-                "Run: python -m clorinn.tests.generate_current_behavior",
+                "Run: python -m clorinn.tests.regression.generate_current_behavior",
         )
