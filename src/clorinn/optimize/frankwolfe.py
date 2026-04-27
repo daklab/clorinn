@@ -82,6 +82,15 @@ class FrankWolfe():
     debug : boolean, default=False
         Whether to provide a verbose output for debugging the algorithm.
 
+    away_step : boolean, default=False
+        Whether to use the away-step Frank-Wolfe variant, which achieves linear
+        convergence when the constraint is active. When enabled, the algorithm
+        maintains an active set of rank-1 atoms and at each iteration chooses
+        between a standard FW step (toward the best new vertex) and an away step
+        (away from the worst active vertex). This is particularly effective for
+        large nuclear norm thresholds where standard FW converges slowly.
+        Only supported for 'nnm' and 'nnm-corr' models.
+
     suppress_warnings : boolean, default=False
         Whether to suppress the warnings. If True, the loglevel is set to ERROR.
         It can be used for a silent run.
@@ -110,7 +119,8 @@ class FrankWolfe():
             benchmark_method = 'rmse',
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
             show_progress = False, print_skip = None,
-            debug = False, suppress_warnings = False, benchmark = False):
+            debug = False, suppress_warnings = False, benchmark = False,
+            away_step = False):
                 
         self.max_iter_ = max_iter
         self.model_ = model
@@ -141,6 +151,8 @@ class FrankWolfe():
         # flag the benchmarking, requires Ytrue for calculating errors
         self.is_benchmark_ = benchmark
         self.benchmark_method_ = benchmark_method
+        # flag for away-step variant
+        self.away_step_ = away_step
         return
 
 
@@ -223,11 +235,12 @@ class FrankWolfe():
         return gx
 
 
-    def _fw_step_size(self, dg, D):
+    def _fw_step_size(self, dg, D, gamma_max = 1.0):
         '''
         Step size from the line search
         dg is the duality gap
         D = X - S is the descent direction
+        gamma_max is the maximum step size (1.0 for FW, alpha_a/(1-alpha_a) for away)
         Masked entries cannot affect the step size, 
         because they are ignored in the objective.
         Duality gap already ignores the masked entries by definition.
@@ -248,7 +261,7 @@ class FrankWolfe():
         denom = np.linalg.norm(Qt, 'fro')**2
 
         ss = dg / denom
-        ss = min(ss, 1.0)
+        ss = min(ss, gamma_max)
         if ss < 0:
             self.logger_.warn(f"Step Size is less than 0 ({ss:g}). Using last valid step size.")
             ss = self.st_list_[-1]
@@ -534,6 +547,244 @@ class FrankWolfe():
     # Stopping criterion
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Away-step Frank-Wolfe: active set management
+    # ------------------------------------------------------------------
+
+    def _init_active_set(self, X0):
+        '''
+        Initialize the active set for away-step Frank-Wolfe.
+
+        The active set is a list of (u, v_t, alpha) tuples, where each
+        atom S_i = -r * u_i @ v_i^T is a vertex of the nuclear norm ball,
+        and alpha_i >= 0 is its weight in the convex decomposition
+        X = sum_i alpha_i * S_i.
+
+        Parameters
+        ----------
+        X0 : np.ndarray or None
+            Initial iterate. If None or zero, the active set starts empty.
+            If non-zero, the SVD of X0 is used to seed the active set.
+        '''
+        self._as_atoms = []  # list of (u, v_t, alpha) tuples
+                             # u: (n, 1), v_t: (1, p), alpha: float
+
+        if X0 is not None and np.linalg.norm(X0, 'fro') > 1e-12:
+            U, s, Vt = np.linalg.svd(X0, full_matrices = False)
+            for k in range(len(s)):
+                if s[k] < 1e-12 * s[0]:
+                    break
+                # X0 = sum_k s_k u_k v_k^T
+                # Atom convention: S_k = -r * u_k' @ v_k'^T
+                # Need: alpha_k * (-r * u_k' @ v_k'^T) = s_k * u_k @ v_k^T
+                # Solution: u_k' = -u_k, v_k'^T = v_k^T, alpha_k = s_k / r
+                u_k  = -U[:, k:k+1]           # (n, 1)
+                vt_k =  Vt[k:k+1, :]          # (1, p)
+                alpha_k = s[k] / self.rank_
+                self._as_atoms.append((u_k, vt_k, alpha_k))
+
+            self.logger_.debug(
+                f"Away-step: initialized active set from X0 with "
+                f"{len(self._as_atoms)} atoms, weight sum = {sum(a for _, _, a in self._as_atoms):.6f}"
+            )
+        return
+
+
+    def _as_find_away_vertex(self, G):
+        '''
+        Find the away vertex: the active atom with maximum inner product
+        with the gradient (i.e., the worst vertex for minimization).
+
+        Computes score_i = <G, S_i> = -r * u_i^T @ G @ v_i^T for each atom
+        and returns the one with the largest score.
+
+        Parameters
+        ----------
+        G : np.ndarray, shape (n, p)
+            Current gradient.
+
+        Returns
+        -------
+        idx : int
+            Index of the away vertex in self._as_atoms.
+        S_a : np.ndarray, shape (n, p)
+            The away vertex matrix.
+        dg_away : float
+            Away gap = <G, S_a> - <G, X>.
+            Since X = sum alpha_i S_i, <G, X> = sum alpha_i score_i.
+        '''
+        A = len(self._as_atoms)
+        n = self._as_atoms[0][0].shape[0]
+        p = self._as_atoms[0][1].shape[1]
+
+        # Stack atoms for batch computation
+        U_mat = np.hstack([a[0] for a in self._as_atoms])       # (n, A)
+        V_mat = np.vstack([a[1] for a in self._as_atoms])       # (A, p)
+        weights = np.array([a[2] for a in self._as_atoms])      # (A,)
+
+        # Compute <G, S_i> = -r * u_i^T G v_i^T
+        # Batch: GVt = G @ V_mat^T -> (n, A), then scores = -r * sum(U_mat * GVt, axis=0)
+        GVt = G @ V_mat.T                                        # (n, A)
+        scores = -self.rank_ * np.sum(U_mat * GVt, axis = 0)     # (A,)
+
+        idx = np.argmax(scores)
+        score_max = scores[idx]
+
+        # <G, X> = sum_i alpha_i * <G, S_i>
+        gx = np.dot(weights, scores)
+
+        dg_away = score_max - gx
+
+        u_a, vt_a, _ = self._as_atoms[idx]
+        S_a = -self.rank_ * u_a @ vt_a
+
+        return int(idx), S_a, dg_away
+
+
+    def _as_find_matching_atom(self, u_new, vt_new, tol = 0.999):
+        '''
+        Check if the atom (u_new, vt_new) already exists in the active set,
+        up to sign ambiguity (u_new @ vt_new ≈ u_i @ v_i^T).
+
+        Returns the index if found, -1 otherwise.
+        '''
+        for i, (u_i, vt_i, _) in enumerate(self._as_atoms):
+            cos_u = abs((u_new.ravel() @ u_i.ravel()))
+            cos_v = abs((vt_new.ravel() @ vt_i.ravel()))
+            if cos_u > tol and cos_v > tol:
+                return i
+        return -1
+
+
+    def _as_update_fw_step(self, u_fw, vt_fw, step):
+        '''
+        Update active set weights after a standard FW step with step size gamma.
+        X_new = (1 - gamma) X + gamma S_fw
+
+        All existing weights are scaled by (1 - gamma), and gamma is added
+        to the weight of S_fw (creating a new atom if necessary).
+        '''
+        # Scale existing weights
+        for i in range(len(self._as_atoms)):
+            u_i, vt_i, alpha_i = self._as_atoms[i]
+            self._as_atoms[i] = (u_i, vt_i, alpha_i * (1.0 - step))
+
+        # Add or merge the FW atom
+        idx = self._as_find_matching_atom(u_fw, vt_fw)
+        if idx >= 0:
+            u_i, vt_i, alpha_i = self._as_atoms[idx]
+            self._as_atoms[idx] = (u_i, vt_i, alpha_i + step)
+        else:
+            self._as_atoms.append((u_fw.copy(), vt_fw.copy(), step))
+
+        self._as_prune()
+        return
+
+
+    def _as_update_away_step(self, idx_a, step, drop = False):
+        '''
+        Update active set weights after an away step with step size gamma.
+        X_new = (1 + gamma) X - gamma S_a
+
+        All existing weights are scaled by (1 + gamma), and gamma is subtracted
+        from the weight of the away vertex S_a.
+        '''
+        for i in range(len(self._as_atoms)):
+            u_i, vt_i, alpha_i = self._as_atoms[i]
+            self._as_atoms[i] = (u_i, vt_i, alpha_i * (1.0 + step))
+
+        # Subtract from the away atom
+        u_a, vt_a, alpha_a = self._as_atoms[idx_a]
+        self._as_atoms[idx_a] = (u_a, vt_a, alpha_a - step)
+
+        if drop:
+            del self._as_atoms[idx_a]
+
+        self._as_prune()
+        return
+
+
+    def _as_prune(self, tol = 1e-14):
+        '''Remove atoms with negligible weight.'''
+        self._as_atoms = [(u, vt, a) for u, vt, a in self._as_atoms if a > tol]
+        return
+
+
+    # ------------------------------------------------------------------
+    # Away-step Frank-Wolfe step function
+    # ------------------------------------------------------------------
+
+    def _fw_one_step_nnm_away(self, X):
+        '''
+        Single away-step Frank-Wolfe iteration for 'nnm' / 'nnm-corr'.
+
+        Chooses between a standard FW step and an away step based on
+        which direction offers a larger inner product with the gradient.
+
+        Parameters
+        ----------
+        X : np.ndarray - current iterate.
+
+        Returns
+        -------
+        Xnew : np.ndarray
+        G    : np.ndarray - gradient at X
+        dg   : float      - Frank-Wolfe duality gap (always the FW gap,
+                            used as convergence certificate)
+        step : float      - step size used
+        '''
+        # 1. Gradient
+        G = self._f_gradient(X)
+
+        # 2. FW oracle (with negative-dg guard)
+        S_fw, D_fw, dg_fw = self._try_positive_dg(self._oracle_nnm, G, X)
+        u_fw = self.svd_u_prev_    # (n, 1)
+        vt_fw = self.svd_vt_prev_  # (1, p)
+
+        # 3. If active set has fewer than 2 atoms, do standard FW step
+        if len(self._as_atoms) < 2:
+            step = self._fw_step_size(dg_fw, D_fw, gamma_max = 1.0)
+            Xnew = X - step * D_fw
+            self._as_update_fw_step(u_fw, vt_fw, step)
+            self.logger_.debug(
+                f"FW step (active set too small). "
+                f"active_set_size = {len(self._as_atoms)}"
+            )
+            return Xnew, G, dg_fw, step
+
+        # 4. Find away vertex
+        idx_a, S_a, dg_away = self._as_find_away_vertex(G)
+
+        # 5. Choose direction
+        if dg_fw >= dg_away:
+            # --- Standard FW step ---
+            D = D_fw
+            step = self._fw_step_size(dg_fw, D, gamma_max = 1.0)
+            Xnew = X - step * D
+            self._as_update_fw_step(u_fw, vt_fw, step)
+            self.logger_.debug(
+                f"FW step. dg_fw = {dg_fw:g}, dg_away = {dg_away:g}, "
+                f"active_set_size = {len(self._as_atoms)}"
+            )
+        else:
+            # --- Away step ---
+            D = S_a - X
+            alpha_a = self._as_atoms[idx_a][2]
+            gamma_max = alpha_a / (1.0 - alpha_a) if alpha_a < 1.0 - 1e-14 else 1e6
+            step = self._fw_step_size(dg_away, D, gamma_max = gamma_max)
+            Xnew = X - step * D
+            is_drop = (step >= gamma_max - 1e-14 * gamma_max)
+            self._as_update_away_step(idx_a, step, drop = is_drop)
+            self.logger_.debug(
+                f"Away step{'(drop)' if is_drop else ''}. "
+                f"dg_fw = {dg_fw:g}, dg_away = {dg_away:g}, "
+                f"alpha_a = {alpha_a:.6f}, step = {step:.6f}, "
+                f"active_set_size = {len(self._as_atoms)}"
+            )
+
+        # Always report the FW duality gap as convergence certificate
+        return Xnew, G, dg_fw, step
+
     def _do_stop(self):
 
         def _safe_relative_change(x1, x0, eps=1e-8):
@@ -694,6 +945,15 @@ class FrankWolfe():
             M = np.zeros_like(Y)
 
         # ---------------------
+        # Initialize away-step active set
+        # ---------------------
+        if self.away_step_:
+            if self.model_ == 'nnm-sparse':
+                raise ValueError("away_step is not supported for model='nnm-sparse'.")
+            self._init_active_set(X0)
+            self.logger_.debug(f"Away-step Frank-Wolfe enabled.")
+
+        # ---------------------
         # Initialize history
         # ---------------------
         dg = np.inf
@@ -738,7 +998,10 @@ class FrankWolfe():
             self.logger_.debug(f"Iteration {self.iter_num_}.")
 
             if self.model_ in ('nnm', 'nnm-corr'):
-                X, G, dg, step = self._fw_one_step_nnm(X)
+                if self.away_step_:
+                    X, G, dg, step = self._fw_one_step_nnm_away(X)
+                else:
+                    X, G, dg, step = self._fw_one_step_nnm(X)
                 fx = self._f_objective(X)
 
             elif self.model_ == 'nnm-sparse':
@@ -777,7 +1040,10 @@ class FrankWolfe():
             # I can live with that bug.
             if self.show_progress_:
                 if (self.iter_num_ == 1) or (self.iter_num_ % self.prog_step_skip_ == 0):
-                    self.logger_.info(f"Iteration {i+1}. Step size {step:.3f}. Duality Gap {dg:g}")
+                    msg = f"Iteration {i+1}. Step size {step:.3f}. Duality Gap {dg:g}"
+                    if self.away_step_:
+                        msg += f". Active set {len(self._as_atoms)}"
+                    self.logger_.info(msg)
 
             if self._do_stop():
                 break
