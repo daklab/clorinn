@@ -123,39 +123,39 @@ class _FWRegressionBase(unittest.TestCase):
 # FrankWolfe test classes
 # ---------------------------------------------------------------------------
 
-class TestRegressionNNM(_FWRegressionBase):
+class TestRegressionFWNNM(_FWRegressionBase):
     """TC1: NNM, fully observed."""
-    fixture_name = 'nnm.npz'
+    fixture_name = 'fw_nnm.npz'
     model = 'nnm'
 
 
-class TestRegressionNNMMask(_FWRegressionBase):
+class TestRegressionFWNNMMask(_FWRegressionBase):
     """TC2: NNM, 10 % missing data."""
-    fixture_name = 'nnm_mask.npz'
+    fixture_name = 'fw_nnm_mask.npz'
     model = 'nnm'
 
 
-class TestRegressionNNMSparse(_FWRegressionBase):
+class TestRegressionFWNNMSparse(_FWRegressionBase):
     """TC3: NNM-Sparse, fully observed."""
-    fixture_name = 'nnm_sparse.npz'
+    fixture_name = 'fw_nnm_sparse.npz'
     model = 'nnm-sparse'
 
 
-class TestRegressionNNMSparseMask(_FWRegressionBase):
+class TestRegressionFWNNMSparseMask(_FWRegressionBase):
     """TC4: NNM-Sparse, 10 % missing data."""
-    fixture_name = 'nnm_sparse_mask.npz'
+    fixture_name = 'fw_nnm_sparse_mask.npz'
     model = 'nnm-sparse'
 
 
-class TestRegressionNNMCorr(_FWRegressionBase):
+class TestRegressionFWNNMCorr(_FWRegressionBase):
     """TC5: NNM-Corr, fully observed."""
-    fixture_name = 'nnm_corr.npz'
+    fixture_name = 'fw_nnm_corr.npz'
     model = 'nnm-corr'
 
 
-class TestRegressionNNMCorrMask(_FWRegressionBase):
+class TestRegressionFWNNMCorrMask(_FWRegressionBase):
     """TC6: NNM-Corr, 10 % missing data."""
-    fixture_name = 'nnm_corr_mask.npz'
+    fixture_name = 'fw_nnm_corr_mask.npz'
     model = 'nnm-corr'
 
 
@@ -269,9 +269,9 @@ class TestRegressionPGDNNMCorrMask(_PGDRegressionBase):
 
 class TestFixturesPresent(unittest.TestCase):
     EXPECTED = [
-        'nnm.npz', 'nnm_mask.npz',
-        'nnm_sparse.npz', 'nnm_sparse_mask.npz',
-        'nnm_corr.npz', 'nnm_corr_mask.npz',
+        'fw_nnm.npz', 'fw_nnm_mask.npz',
+        'fw_nnm_sparse.npz', 'fw_nnm_sparse_mask.npz',
+        'fw_nnm_corr.npz', 'fw_nnm_corr_mask.npz',
         'pgd_nnm.npz', 'pgd_nnm_mask.npz',
         'pgd_nnm_sparse.npz', 'pgd_nnm_sparse_mask.npz',
         'pgd_nnm_corr.npz', 'pgd_nnm_corr_mask.npz',

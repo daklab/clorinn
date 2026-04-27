@@ -35,9 +35,9 @@ from .theory.test_nnm_corr_exact_missingness import TestNNMCorrExactMissingness
 # ---------------------------------------------------------------------------
 from .regression.test_current_behavior import (
     TestFixturesPresent,
-    TestRegressionNNM, TestRegressionNNMMask,
-    TestRegressionNNMSparse, TestRegressionNNMSparseMask,
-    TestRegressionNNMCorr, TestRegressionNNMCorrMask,
+    TestRegressionFWNNM, TestRegressionFWNNMMask,
+    TestRegressionFWNNMSparse, TestRegressionFWNNMSparseMask,
+    TestRegressionFWNNMCorr, TestRegressionFWNNMCorrMask,
     TestRegressionPGDNNM, TestRegressionPGDNNMMask,
     TestRegressionPGDNNMSparse, TestRegressionPGDNNMSparseMask,
     TestRegressionPGDNNMCorr, TestRegressionPGDNNMCorrMask,

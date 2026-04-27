@@ -110,48 +110,48 @@ def _save(path, **arrays):
 # Individual fixture generators
 # ---------------------------------------------------------------------------
 
-def gen_nnm(prob):
+def gen_fw_nnm(prob):
     """TC1: NNM, fully observed."""
     m = FrankWolfe(model='nnm', **FW_CONFIG)
     m.fit(prob['Y'], radius=R_NUC)
     _save(
-        os.path.join(FIXTURES_DIR, 'nnm.npz'),
+        os.path.join(FIXTURES_DIR, 'fw_nnm.npz'),
         Y=prob['Y'], radius=np.float64(R_NUC),
         X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
         steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
-def gen_nnm_mask(prob):
+def gen_fw_nnm_mask(prob):
     """TC2: NNM, 10 % missing data."""
     m = FrankWolfe(model='nnm', **FW_CONFIG)
     m.fit(prob['Y'], radius=R_NUC, mask=prob['mask'])
     _save(
-        os.path.join(FIXTURES_DIR, 'nnm_mask.npz'),
+        os.path.join(FIXTURES_DIR, 'fw_nnm_mask.npz'),
         Y=prob['Y'], radius=np.float64(R_NUC), mask=prob['mask'],
         X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
         steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
-def gen_nnm_sparse(prob):
+def gen_fw_nnm_sparse(prob):
     """TC3: NNM-Sparse, fully observed."""
     m = FrankWolfe(model='nnm-sparse', **FW_CONFIG)
     m.fit(prob['Y'], radius=R_NUC, sparse_scale=L1_MULT)
     _save(
-        os.path.join(FIXTURES_DIR, 'nnm_sparse.npz'),
+        os.path.join(FIXTURES_DIR, 'fw_nnm_sparse.npz'),
         Y=prob['Y'], radius=np.float64(R_NUC), sparse_scale=np.float64(L1_MULT),
         X=m.result.X, M=m.result.M, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
         steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
-def gen_nnm_sparse_mask(prob):
+def gen_fw_nnm_sparse_mask(prob):
     """TC4: NNM-Sparse, 10 % missing data."""
     m = FrankWolfe(model='nnm-sparse', **FW_CONFIG)
     m.fit(prob['Y'], radius=R_NUC, sparse_scale=L1_MULT, mask=prob['mask'])
     _save(
-        os.path.join(FIXTURES_DIR, 'nnm_sparse_mask.npz'),
+        os.path.join(FIXTURES_DIR, 'fw_nnm_sparse_mask.npz'),
         Y=prob['Y'], radius=np.float64(R_NUC), sparse_scale=np.float64(L1_MULT),
         mask=prob['mask'],
         X=m.result.X, M=m.result.M, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
@@ -159,24 +159,24 @@ def gen_nnm_sparse_mask(prob):
     )
 
 
-def gen_nnm_corr(prob):
+def gen_fw_nnm_corr(prob):
     """TC5: NNM-Corr (Mahalanobis loss), fully observed."""
     m = FrankWolfe(model='nnm-corr', **FW_CONFIG)
     m.fit(prob['Y'], radius=R_NUC, noise_cov=prob['noise_cov'])
     _save(
-        os.path.join(FIXTURES_DIR, 'nnm_corr.npz'),
+        os.path.join(FIXTURES_DIR, 'fw_nnm_corr.npz'),
         Y=prob['Y'], radius=np.float64(R_NUC), A=prob['A'],
         X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
         steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
     )
 
 
-def gen_nnm_corr_mask(prob):
+def gen_fw_nnm_corr_mask(prob):
     """TC6: NNM-Corr, 10 % missing data."""
     m = FrankWolfe(model='nnm-corr', **FW_CONFIG)
     m.fit(prob['Y'], radius=R_NUC, mask=prob['mask'], noise_cov=prob['noise_cov'])
     _save(
-        os.path.join(FIXTURES_DIR, 'nnm_corr_mask.npz'),
+        os.path.join(FIXTURES_DIR, 'fw_nnm_corr_mask.npz'),
         Y=prob['Y'], radius=np.float64(R_NUC), mask=prob['mask'], A=prob['A'],
         X=m.result.X, fx=np.array(m.result.history.loss), dg=np.array(m.result.history.duality_gap),
         steps=np.array(m.result.history.step_size), n_iter=np.int64(m.result.n_iter),
@@ -273,9 +273,9 @@ def gen_pgd_nnm_corr_mask(prob):
 # ---------------------------------------------------------------------------
 
 GENERATORS = [
-    gen_nnm, gen_nnm_mask,
-    gen_nnm_sparse, gen_nnm_sparse_mask,
-    gen_nnm_corr, gen_nnm_corr_mask,
+    gen_fw_nnm, gen_fw_nnm_mask,
+    gen_fw_nnm_sparse, gen_fw_nnm_sparse_mask,
+    gen_fw_nnm_corr, gen_fw_nnm_corr_mask,
     gen_pgd_nnm, gen_pgd_nnm_mask,
     gen_pgd_nnm_sparse, gen_pgd_nnm_sparse_mask,
     gen_pgd_nnm_corr, gen_pgd_nnm_corr_mask,
