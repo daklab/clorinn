@@ -150,8 +150,7 @@ class NNMObjective():
         """
         Dm = self._masked(D)
         Qt = Dm if self.weight_mask_ is None else self.weight_mask_ * Dm
-        return float(np.linalg.norm(Qt, 'fro') ** 2)
-        #return self.squared_frobenius_norm(Qt)
+        return self.squared_frobenius_norm(Qt)
 
 
     def value(self, X):
@@ -163,7 +162,6 @@ class NNMObjective():
         R = self._masked(self.Y_ - X)
         if self.weight_mask_ is not None:
             R = self.weight_mask_ * R
-        #return float(0.5 * np.linalg.norm(R, 'fro') ** 2)
         return 0.5 * self.squared_frobenius_norm(R)
 
 
@@ -189,8 +187,9 @@ class NNMObjective():
 
     def squared_frobenius_norm(self, X):
         """Slightly cheaper Frobenius norm / small gain, but in inner loop."""
-        #return float(np.einsum('ij,ij->', X, X))
-        return float(np.sum(X * X))
+        #return float(np.linalg.norm(X, 'fro')**2)
+        #return float(np.sum(X * X))
+        return float(np.einsum('ij,ij->', X, X))
 
 
     # ------------------------------------------------------------------
@@ -391,7 +390,7 @@ class NNMCorrObjective(NNMObjective):
                 W  = self.weight_mask_[np.ix_(pat.obs_idx, pat.col_idx)]
                 Qt = pat.L_inv.T @ (np.square(W) * (pat.L_inv @ block))
             else:
-                Qt = pat.Sigma_inv @ block # one matmul, not two (L_inv @ L_inv.T @ block)
+                Qt = pat.Sigma_inv @ block # one matmul, not two (L_inv.T @ L_inv @ block)
             Gout[np.ix_(pat.obs_idx, pat.col_idx)] = Qt
         return Gout
     
@@ -411,8 +410,7 @@ class NNMCorrObjective(NNMObjective):
             Qt = pat0.L_inv @ Dm
             if self.weight_mask_ is not None:
                 Qt = self.weight_mask_ * Qt
-            return float(np.linalg.norm(Qt, 'fro') ** 2)
-            #return self.squared_frobenius_norm(Qt)
+            return self.squared_frobenius_norm(Qt)
     
         # Exact path: per-pattern submatrix application
         total = 0.0
@@ -421,8 +419,7 @@ class NNMCorrObjective(NNMObjective):
             Qt    = pat.L_inv @ block
             if self.weight_mask_ is not None:
                 Qt = self.weight_mask_[np.ix_(pat.obs_idx, pat.col_idx)] * Qt
-            total += float(np.linalg.norm(Qt, 'fro') ** 2)
-            #total += self.squared_frobenius_norm(Qt)
+            total += self.squared_frobenius_norm(Qt)
         return total
     
     
@@ -441,8 +438,7 @@ class NNMCorrObjective(NNMObjective):
             Qt = pat0.L_inv @ R
             if self.weight_mask_ is not None:
                 Qt = self.weight_mask_ * Qt
-            return float(0.5 * np.linalg.norm(Qt, 'fro') ** 2)
-            #return 0.5 * self.squared_frobenius_norm(Qt)
+            return 0.5 * self.squared_frobenius_norm(Qt)
     
         # Exact path: per-pattern submatrix application
         total = 0.0
@@ -451,8 +447,7 @@ class NNMCorrObjective(NNMObjective):
             Qt    = pat.L_inv @ block
             if self.weight_mask_ is not None:
                 Qt = self.weight_mask_[np.ix_(pat.obs_idx, pat.col_idx)] * Qt
-            total += float(0.5 * np.linalg.norm(Qt, 'fro') ** 2)
-            #total += 0.5 * self.squared_frobenius_norm(Qt)
+            total += 0.5 * self.squared_frobenius_norm(Qt)
         return total
     
     
@@ -505,6 +500,12 @@ class NNMCorrObjective(NNMObjective):
                 Sigma_inv = Sigma_inv,
                 lam_min = lam_min,
             ))
+
+        if not blocks:
+            raise ValueError(
+                "All SNP columns are fully missing. "
+                "No observed entries remain for NNM-Corr."
+            )
         return blocks
 
 
