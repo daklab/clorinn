@@ -10,3 +10,6 @@ class SolverConfig:
     step_tol       : float = 1e-3
     rel_tol        : float = 1e-8
     simplex_method : str = 'sort'
+    # AFW-only
+    prune_every    : int   = 100      # set to 0 to disable periodic pruning
+    prune_eps_rel  : float = 1e-9

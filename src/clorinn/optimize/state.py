@@ -46,3 +46,8 @@ class IterState:
     svd_vt          : np.ndarray | None = None
     svd_n_iter      : int | None        = None
     stop_reason     : StopReason = StopReason.MAX_ITER
+    # AFW-only fields; remain None / unused under plain FW.
+    # forward reference keeps state.py from needing 
+    # to import active_set.py (avoids any potential circular import).
+    active_set      : 'ActiveSet | None' = None
+    last_step_kind  : str | None         = None

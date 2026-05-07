@@ -520,6 +520,22 @@ class FrankWolfe():
 
 
     # ------------------------------------------------------------------
+    # IterState hook
+    # ------------------------------------------------------------------
+
+    def _init_iter_state(self, X0):
+        """
+        Build the initial IterState for the iteration loop.
+
+        Subclasses override this to seed additional iteration state
+        (e.g. AwayStepFrankWolfe seeds the active set from X0). The base
+        FW class only sets X and (for sparse) M.
+        """
+        X = np.zeros_like(self.obj_.Y_) if X0 is None else X0.copy()
+        M = self.obj_.project_sparse(X) if self.model_ == 'nnm-sparse' else None
+        return IterState(X = X, M = M)
+
+    # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
     def fit(self, Y, radius,
@@ -609,10 +625,7 @@ class FrankWolfe():
         # ---------------------
         # Initialize iterates
         # ---------------------
-        X = np.zeros_like(self.obj_.Y_) if X0 is None else X0.copy()
-        #M = np.zeros_like(self.obj_.Y_) if self.model_ == 'nnm-sparse' else None
-        M = self.obj_.project_sparse(X) if self.model_ == 'nnm-sparse' else None
-        iter_state = IterState(X=X, M=M)
+        iter_state = self._init_iter_state(X0)
 
         # ---------------------
         # Initialize history

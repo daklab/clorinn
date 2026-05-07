@@ -260,7 +260,7 @@ class ProjectedGradientDescent():
                 break
  
             # ---- Stopping: relative loss ----
-            if 'relative_loss' in self.stop_criteria_ and i > 0 and np.isfinite(fx_old):
+            if 'relative_loss' in self.stop_criteria_ and n_iter > 1 and np.isfinite(fx_old):
                 rel = abs(fx - fx_old) / max(1.0, abs(fx_old))
                 if rel < self.rel_tol_:
                     if self.prog_step_skip_ is not None:

@@ -15,7 +15,6 @@ def version():
     namespace = {}
     with open(vfn, "r", encoding="utf-8") as f:
         exec(compile(f.read(), vfn, "exec"), namespace)
-    exec(compile(open(vfn).read(), vfn, 'exec'))
     return namespace["__version__"]
 
 
