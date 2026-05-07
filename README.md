@@ -173,10 +173,16 @@ pgd = ProjectedGradientDescent(
     stop_criteria=('relative_loss', 'boundary_active'),
     verbose=1,
 )
-pgd.fit(Z, radius=r)
-
 fw = FrankWolfe(model=model)
-fw.fit(Z, radius=r, X0=pgd.result.X)
+
+fit_kwargs = {}
+if model == 'nnm-corr':
+    fit_kwargs['noise_cov'] = A
+elif model == 'nnm-sparse':
+    fit_kwargs['sparse_scale'] = 0.5
+
+pgd.fit(Z, radius=r, **fit_kwargs)
+fw.fit(Z, radius=r, X0=pgd.result.X, **fit_kwargs)
 ```
 
 ## Sampling covariance

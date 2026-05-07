@@ -125,6 +125,26 @@ class NNMObjective():
         return self.radius_
 
 
+    @property
+    def gradient_norm_bound(self):
+        """
+        Upper bound on ||grad f(X)||_F over the feasible set.
+        Computed once from problem data; constant across iterations.
+
+        For the (weighted, masked) Frobenius loss:
+            ||G||_F ≤ w_max^2 · (r + l + ||Y||_F)
+        where r is the nuclear-norm radius, l the l1 radius (0 if absent),
+        and w_max = 1 in the unweighted case.
+        """
+        if not hasattr(self, 'grad_norm_bound_'):
+            w2_max = 1.0 if self.weight_mask_ is None else float(np.max(np.square(self.weight_mask_)))
+            Y_norm = float(np.linalg.norm(self.Y_))
+            self.grad_norm_bound_ = w2_max * (
+                self.radius_ + getattr(self, 'l1_threshold_', 0.0) + Y_norm
+            )
+        return self.grad_norm_bound_
+
+
     # ------------------------------------------------------------------
     # Core solver interface
     # ------------------------------------------------------------------
@@ -362,6 +382,23 @@ class NNMCorrObjective(NNMObjective):
         )
 
         return
+
+
+    @property
+    def gradient_norm_bound(self):
+        """
+        Upper bound on the gradient norm
+
+            ||grad f(X)||_F = ||A^{-1} (X - Y)||_F ≤ (1/lam_min) · (r + ||Y||_F).
+
+        For the per-pattern path under missing data, lam_min is taken as the
+        smallest eigenvalue across all submatrix patterns (also used for the
+        PGD step size).
+        """
+        if not hasattr(self, 'grad_norm_bound_'):
+            Y_norm = float(np.linalg.norm(self.Y_))
+            self.grad_norm_bound_ = (self.radius_ + Y_norm) / self.pgd_step_size_
+        return self.grad_norm_bound_
 
 
     def gradient(self, X):

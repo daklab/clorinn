@@ -14,7 +14,8 @@ FWInvariantBase
     duality gap nonnegative, step size bounds.
 
 FWSparseInvariantBase(FWInvariantBase)
-    Adds l1 norm feasibility for NNM-Sparse objectives.
+    Adds l1 norm feasibility for NNM-Sparse objectives, duality gap of
+    sparse block close to zero.
 
 PGDInvariantBase
     PGD invariants: nuclear norm feasibility, objective non-increasing.
@@ -149,6 +150,9 @@ class FWSparseInvariantBase(FWInvariantBase):
         if cls.result is None:
             raise unittest.SkipTest("base class")
 
+    # ------------------------------------------------------------------
+    # l1 norm feasibility
+    # ------------------------------------------------------------------
     def test_l1_norm_feasibility(self):
         """||M||_1 <= l1_threshold at the converged iterate."""
         #l1 = np.linalg.norm(self.result.M, 1)
@@ -158,6 +162,39 @@ class FWSparseInvariantBase(FWInvariantBase):
             msg=f"||M||_1 = {l1:.6g} > l1_threshold = {self.l1_threshold:.6g}",
         )
 
+    # ------------------------------------------------------------------
+    # duality gap of M = 0
+    # ------------------------------------------------------------------
+
+    def test_sparse_block_at_projection(self):
+        """gM should be ~0 at every iteration."""
+        if self.result.history.duality_gap_sparse is None:
+            self.skipTest("not a sparse run")
+        gM = np.array(self.result.history.duality_gap_sparse)
+        # Skip iter 0 (gM is meaningful only after first projection)
+        max_gM = np.abs(gM[1:]).max() if len(gM) > 1 else 0.0
+        self.assertLess(
+            max_gM, _DG_TOL,
+            msg=f"gM exceeded tolerance ({max_gM:.3g}); "
+                "projection invariant likely violated."
+        )
+
+    # ------------------------------------------------------------------
+    # l1 ball is active for this test problem
+    # ------------------------------------------------------------------
+
+    def test_l1_ball_is_active_in_test_problem(self):
+        """Pre-condition for test_sparse_block_at_projection: the test
+        fixture must exercise an active l1 ball, otherwise gM = 0 holds
+        trivially because G ≈ 0."""
+        m = self.result
+        self.assertGreaterEqual(
+            m.metrics['l1_norm'],
+            m.metrics['l1_threshold'] - 1e-6,
+            msg=f"l1 ball is inactive (||M||_1 = {m.metrics['l1_norm']:.4g} "
+                f"< l1_threshold = {m.metrics['l1_threshold']:.4g}). "
+                "gM = 0 invariant holds vacuously. Tighten l1_threshold."
+        )
 
 # ---------------------------------------------------------------------------
 # PGD base

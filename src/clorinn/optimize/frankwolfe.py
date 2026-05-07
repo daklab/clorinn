@@ -6,7 +6,6 @@ import time
 import logging
 from .objectives import make_objective
 from .svd import nuclear_norm_oracle
-from .projections import EuclideanProjection
 from .result import History, FitResult
 from .config import SolverConfig
 from .state import IterState, StopReason
@@ -158,8 +157,7 @@ class FrankWolfe():
 
     def _oracle_l1norm(self, G):
         '''
-        Linear optimization oracle,
-        where the feasible region is a l1 norm ball for some r
+        Linear optimization oracle on the l1 norm ball.
         '''
         idx = np.unravel_index(np.argmax(np.abs(G)), G.shape)
         S = np.zeros_like(G)
@@ -169,13 +167,12 @@ class FrankWolfe():
         return S
 
 
-    def _oracle_nnm(self, G, *, iter_state, warm_start_uv = False, svd_max_iter = None):
+    def _oracle_nucnorm(self, G, *, iter_state, warm_start_uv = False, svd_max_iter = None):
         '''
-        Compute the FW linear oracle, descent direction D, and duality gap
-        for the 'nnm' and 'nnm-corr' models.
- 
-        Uses the convention D = X - S so that the update is:
-            X_new = X - step * D  =  (1 - step) * X + step * S
+        Linear optimization oracle on the nuclear norm ball.
+        This is already returned by the `nuclear_norm_oracle`.
+        We only take the results, log the current atoms in iter_state
+        and return the clean vertex.
  
         Parameters
         ----------
@@ -190,9 +187,7 @@ class FrankWolfe():
  
         Returns
         -------
-        S : np.ndarray  - FW vertex (nuclear-norm oracle output)
-        D : np.ndarray  - descent direction  (X - S)
-        dg : float      - duality gap
+        S    : np.ndarray  - FW vertex (nuclear-norm oracle output)
         '''
 
         max_iter = self._get_svd_max_iter(svd_max_iter, iter_state)
@@ -217,71 +212,33 @@ class FrankWolfe():
         iter_state.svd_vt = v1_t
         iter_state.svd_n_iter = n_iter
 
-        D  = iter_state.X - S
-        dg = np.sum(D * G)   # equivalent to trace(D.T @ G), avoids full matmul
-        return S, D, dg
- 
- 
-    def _oracle_nnm_sparse(self, G, *, iter_state, warm_start_uv = False, svd_max_iter = None):
-        '''
-        Compute the FW linear oracle, descent directions DL / DM, and duality gap
-        for the 'nnm-sparse' model.
- 
-        Uses the convention DL = X - SL, DM = M - SM so that the updates are:
-            X_new = X - step * DL  =  (1 - step) * X + step * SL
-            M_new = M - step * DM  =  (1 - step) * M + step * SM
- 
-        Parameters
-        ----------
-        G : np.ndarray
-            Current gradient.
-        iter_state: IterState
-            Current iterate.
-        warm_start_uv : bool
-            Whether to warm-start the SVD power iteration.
-        svd_max_iter : int or None
-            Maximum iterations for the SVD solver.
- 
-        Returns
-        -------
-        SL : np.ndarray  - nuclear-norm oracle output
-        SM : np.ndarray  - l1-norm oracle output
-        DL : np.ndarray  - low-rank descent direction  (X - SL)
-        DM : np.ndarray  - sparse descent direction    (M - SM)
-        dg : float       - duality gap
-        '''
+        return S
 
-        SL = self._oracle_nnm(G,
-            iter_state = iter_state,
-            warm_start_uv = warm_start_uv, 
-            svd_max_iter = svd_max_iter)[0]
-        SM = self._oracle_l1norm(G)
-        DL = iter_state.X - SL
-        DM = iter_state.M - SM
-        dg = np.sum(DL * G) + np.sum(DM * G)
-        return SL, SM, DL, DM, dg
- 
- 
+
     # ------------------------------------------------------------------
     # Negative duality-gap guard
     # ------------------------------------------------------------------
  
-    def _try_positive_dg(self, oracle_fn, G, *, iter_state):
+    def _try_positive_dg(self, G, *, iter_state):
         '''
         Call ``oracle_fn(G, *args, warm_start_uv=False, svd_max_iter=...)``
-        and, if the returned duality gap is negative, retry with progressively
-        larger SVD iteration budgets (power method only).
+        Call `_oracle_nucnorm`, build the descent direction D = anchor - S,
+        compute dg = <D, G>, and retry with larger SVD iteration budgets 
+        if dg < 0 (power iteration only).
 
         A negative duality gap indicates inaccurate singular vectors.
         Retrying with more power iterations (for method='power') typically
         resolves the issue.
- 
-        ``oracle_fn`` must return a tuple whose **last element is dg**.
+
+        After this returns, iter_state.svd_u / svd_vt hold the singular
+        vectors of the accepted oracle call.
+
+        AFW note: this helper is for the *FW direction* only. The AFW
+        away direction has D_aw = S_aw - X with S_aw drawn from the active
+        set (not the SVD), so it does not need this helper.
  
         Parameters
         ----------
-        oracle_fn : callable
-            One of ``_oracle_nnm`` or ``_oracle_nnm_sparse``.
         G : np.ndarray
             Current gradient passed as the first positional argument to oracle_fn.
         iter_state : IterState
@@ -289,20 +246,60 @@ class FrankWolfe():
  
         Returns
         -------
-        result : tuple
-            The return value of oracle_fn (possibly from a retry call).
+        S : np.ndarray  - FW vertex (nuclear-norm oracle output)
+        D : np.ndarray  - descent direction  (X - S)
+        dg : float      - duality gap
+
         '''
-        result = oracle_fn(G,
+        S = self._oracle_nucnorm(
+            G,
             iter_state = iter_state,
             warm_start_uv = False,
             svd_max_iter  = self.cfg_.svd_max_iter)
-        dg = result[-1]
-        if dg >= 0:
-            return result
- 
-        self.logger_.warn(f"Iteration {iter_state.istep}. Duality gap < 0 ({dg:g}).")
+        D = iter_state.X - S
+        dg = float(np.sum(D * G))   # equivalent to trace(D.T @ G), avoids full matmul
+
+        # Numerical-noise guard. dg = <X, G> - <S, G> where -<S, G> = r * sigma_1(G).
+        # When X is on or near the FW vertex (e.g. after a gamma=1 step), these
+        # two terms cancel and dg is dominated by floating-point roundoff.
+        # Clamp tiny negatives to 0; only retry / warn if the gap is genuinely
+        # negative at a magnitude that exceeds floating-point noise.
+        #
+        # What should be the noise tolerance?
+        # The standard floating-point dot-product bound gives
+        #
+        #   |fl(dg) - dg| <= gamma_N * |vec(X-S)|^T |vec(G)|,
+        #
+        # with gamma_N = N*u/(1 - N*u), where N = X.size.
+        # By Cauchy-Schwarz,
+        #
+        #   |vec(X-S)|^T |vec(G)| <= ||X-S||_F * ||G||_F.
+        #
+        # For a practical tolerance, we use a smaller pairwise-summation-style
+        # factor k_round = 10 * log2(N), rather than the pessimistic sequential
+        # worst-case factor N. The forward roundoff bound on dg = <X - S, G>:
+        #
+        #   |fl(dg) - dg|  ≤  k_round · eps · (||X||_F + ||S||_F) · ||G||_F
+        #
+        # because ||X-S||_F <= ||X||_F + ||S||_F.
+        #
+        # Use feasibility bounds:
+        #   ||X||_F ≤ r, ||S||_F = r  =>  ||X||_F + ||S||_F ≤ 2r
+        #   ||G||_F bounded by self.obj_.gradient_norm_bound  (cached)
+        # k_round = 10 · log2(N) absorbs pairwise-summation and X - S subtraction.
+        k_round    = 10.0 * np.log2(max(D.size, 2))
+        noise_tol  = (
+            k_round 
+            * np.finfo(float).eps 
+            * 2.0 * self.obj_.radius_
+            * self.obj_.gradient_norm_bound
+        )
+        if dg >= -noise_tol:
+            return S, D, max(dg, 0.0)
+
+        self.logger_.warn(f"Iteration {iter_state.istep}. Duality gap < 0 ({dg:g}, noise tolerance = {noise_tol:g})")
         if self.cfg_.svd_method != 'power':
-            return result
+            return S, D, dg
  
         self.logger_.warn("Retrying SVD power iteration with larger budget.")
         svd_max_iter = self.cfg_.svd_max_iter * 2 if self.cfg_.svd_max_iter is not None else 100
@@ -310,35 +307,45 @@ class FrankWolfe():
 
             # Use fresh random initialization (warm_start_uv=False) so we don't
             # get trapped in the basin of a non-dominant singular vector.
-            result = oracle_fn(G,
+            S = self._oracle_nucnorm(
+                G,
                 iter_state = iter_state,
                 warm_start_uv = False,
                 svd_max_iter  = svd_max_iter)
-            dg = result[-1]
+            D = iter_state.X - S
+            dg = np.sum(D * G)
             self.logger_.warn(
                 f"Power iteration trial {n_rep}. "
                 f"dg = {dg:g}, n_iter = {iter_state.svd_n_iter}, max_iter = {svd_max_iter}"
             )
-            if dg > 0:
-                break
+            if dg >= -noise_tol:
+                return S, D, max(dg, 0.0)
             svd_max_iter *= 2
  
-        if dg < 0:
-            self.logger_.warn(
-                f"Power iteration could not recover positive dg ({dg:g})."
-            )
-        return result
+        self.logger_.warn(
+            f"Power iteration could not recover non-negative dg "
+            f"({dg:g}, noise tol = {noise_tol:g})."
+        )
+        return S, D, dg
 
     # ------------------------------------------------------------------
     # Step size
     # ------------------------------------------------------------------
  
-    def _compute_step_size(self, dg, D, iter_state):
+    def _compute_step_size(self, dg, D, iter_state, gamma_max = 1.0):
         """
-        Exact line-search step size  gamma = dg / step_denom(D), clamped to [0, 1].
+        Exact line-search step size  gamma = dg / step_denom(D), 
+        clamped to [0, gamma_max].
  
         The denominator is model-specific and computed by the objective.
- 
+        gamma_max sets the upper bound on the step:
+
+            FW direction (any model):  gamma_max = 1.0  (default)
+            AFW away direction:        gamma_max = alpha_aw / (1 - alpha_aw),
+                                       to keep the active-set weight of the
+                                       worst atom non-negative after the update.
+
+
         Parameters
         ----------
         dg : float
@@ -347,10 +354,12 @@ class FrankWolfe():
             Descent direction.
         iter_state: IterState
             Required for last step size.
+        gamma_max : float, default=1.0
+            Upper clamp on the step size.
  
         Returns
         -------
-        ss : float   step size in (0, 1].
+        ss : float   step size in (0, gamma_max].
         """
         denom = self.obj_.step_denom(D)
 
@@ -358,10 +367,15 @@ class FrankWolfe():
             self.logger_.warn(f"Step size denominator is {denom:g} at iteration {iter_state.istep}. Returning zero step.")
             return 0.0
 
-        ss    = min(dg / denom, 1.0)
+        ss  = min(dg / denom, gamma_max)
         if ss < 0:
-            self.logger_.warn(f"Step size < 0 ({ss:g}). Using last valid step size.")
-            ss = iter_state.last_step_size
+            self.logger_.warn(
+                f"Step size < 0 ({ss:g}) at iteration {iter_state.istep}. "
+                "Returning zero step; the algorithm will stop on this "
+                "iteration if 'step_size' is in stop_criteria."
+            )
+            ss = 0.0
+            #ss = iter_state.last_step_size
         return ss
  
  
@@ -372,6 +386,9 @@ class FrankWolfe():
     def _fw_one_step_nnm(self, iter_state):
         '''
         Single Frank-Wolfe step for the 'nnm' and 'nnm-corr' models.
+
+        Uses the convention D = X - S so that the update is:
+            X_new = X - step * D  =  (1 - step) * X + step * S
  
         Parameters
         ----------
@@ -389,19 +406,26 @@ class FrankWolfe():
         '''
         # 1. Gradient
         G = self.obj_.gradient(iter_state.X)
+
         # 2. Linear oracle + descent direction + duality gap (with negative-dg guard)
-        S, D, dg = self._try_positive_dg(self._oracle_nnm, G, iter_state = iter_state)
+        S, D, dg = self._try_positive_dg(G, iter_state = iter_state)
+
         # 3. Step size
         step_size = self._compute_step_size(dg, D, iter_state)
-        # 4. Update:  X - step*(X - S) = (1-step)*X + step*S
+
+        # 4. Update
         iter_state.X = iter_state.X - step_size * D
         iter_state.last_step_size = step_size
+
         return G, dg, step_size
  
  
     def _fw_one_step_nnm_sparse(self, iter_state):
         '''
         Single Frank-Wolfe step for the 'nnm-sparse' model.
+ 
+        Uses the convention D = X - S so that the update is:
+            X_new = X - step * D  =  (1 - step) * X + step * S
  
         Parameters
         ----------
@@ -415,32 +439,30 @@ class FrankWolfe():
         Returns
         -------
         G    : np.ndarray - gradient at X + M
-        dg   : float      - duality gap
+        dgX  : float      - X-block duality gap (drives stopping)
+        dgM  : float      - M-block duality gap (diagnostic, ~0)
         step : float      - step size used
         '''
+        # 1. Gradient at the joint iterate
         G = self.obj_.gradient(iter_state.X + iter_state.M)
-        SL, SM, DL, DM, dg = self._try_positive_dg(self._oracle_nnm_sparse, G, iter_state = iter_state)
 
-        # v1.0
-        #step_size    = self._compute_step_size(dg, DL, iter_state)
-        #iter_state.X = iter_state.X - step_size * DL
-        #Mnew         = iter_state.M - step_size * DM
-        #G_half       = self.obj_.gradient(iter_state.X + Mnew)
-        #iter_state.M = self._proj_l1ball(Mnew - G_half)
+        # 2. X-block linear oracle + descent direction + duality gap (with negative-dg guard)
+        SX, DX, dgX = self._try_positive_dg(G, iter_state = iter_state)
 
-        # v2.0
-        step_size = self._compute_step_size(np.sum(DL * G), DL, iter_state)
-        iter_state.X = iter_state.X - step_size * DL
+        # 3. M-block: closed-form l1 oracle, gM diagnostic only (no retry)
+        SM = self._oracle_l1norm(G)
+        DM = iter_state.M - SM
+        dgM = float(np.sum(DM * G))
+
+        # 4. Step size from the X-block gap
+        step_size = self._compute_step_size(dgX, DX, iter_state)
+
+        # 5. Update X, then exact projection for M
+        iter_state.X = iter_state.X - step_size * DX
         iter_state.M = self.obj_.project_sparse(iter_state.X)
+        iter_state.last_step_size = step_size
 
-        return G, dg, step_size
-
-
-    #def _proj_l1ball(self, X):
-    #    n, p = X.shape
-    #    ep = EuclideanProjection(method = self.cfg_.simplex_method, target = 'l1')
-    #    ep.fit(self.obj_._masked(X).ravel(), a = self.obj_.l1_threshold_)
-    #    return ep.proj.reshape(n, p)
+        return G, dgX, dgM, step_size
 
 
     # ------------------------------------------------------------------
@@ -603,9 +625,10 @@ class FrankWolfe():
         iter_state.istep = 0
 
         if self.model_ == 'nnm-sparse':
-            fx_hist = [self.obj_.value(iter_state.X + iter_state.M)]
-            fm_hist = [self.obj_.value(iter_state.M)]
-            fl_hist = [self.obj_.value(iter_state.X)]
+            fx_hist  = [self.obj_.value(iter_state.X + iter_state.M)]
+            fm_hist  = [self.obj_.value(iter_state.M)]
+            fl_hist  = [self.obj_.value(iter_state.X)]
+            dgm_hist = [np.inf] 
 
         cpu_time_old = time.process_time()
 
@@ -622,7 +645,7 @@ class FrankWolfe():
                 fx = self.obj_.value(iter_state.X)
 
             elif self.model_ == 'nnm-sparse':
-                G, dg, step_size = self._fw_one_step_nnm_sparse(iter_state)
+                G, dg, dgM, step_size = self._fw_one_step_nnm_sparse(iter_state)
                 fx = self.obj_.value(iter_state.X + iter_state.M)
                 fm = self.obj_.value(iter_state.M)
                 fl = self.obj_.value(iter_state.X)
@@ -640,6 +663,7 @@ class FrankWolfe():
             if self.model_ == 'nnm-sparse':
                 fm_hist.append(fm)
                 fl_hist.append(fl)
+                dgm_hist.append(dgM)
 
             if self.prog_step_skip_ is not None:
                 if (iter_state.istep == 1) or (iter_state.istep % self.prog_step_skip_ == 0):
@@ -661,6 +685,8 @@ class FrankWolfe():
             cpu_time      = cpu_time_hist,
             loss_sparse   = fm_hist if self.model_ == 'nnm-sparse' else None,
             loss_low_rank = fl_hist if self.model_ == 'nnm-sparse' else None,
+            duality_gap_sparse   = dgm_hist if self.model_ == 'nnm-sparse' else None,
+            duality_gap_low_rank = dg_hist  if self.model_ == 'nnm-sparse' else None,
         )
 
         metrics = {

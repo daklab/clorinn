@@ -2,19 +2,21 @@ import os
 import logging
 
 def name():
-    return "NNWMF"
+    return "Clorinn"
 
 
 def description():
-    return "Nuclear Norm Weighted Matrix Factorization"
+    return "Low rank matrix approximation using nuclear norm constraint"
 
 
 def version():
     ## Get the version from version.py without importing the package
     vfn = os.path.join(os.path.dirname(__file__), '../version.py')
+    namespace = {}
+    with open(vfn, "r", encoding="utf-8") as f:
+        exec(compile(f.read(), vfn, "exec"), namespace)
     exec(compile(open(vfn).read(), vfn, 'exec'))
-    res = locals()['__version__']
-    return res
+    return namespace["__version__"]
 
 
 def get_name():

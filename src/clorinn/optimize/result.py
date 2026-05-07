@@ -13,6 +13,8 @@ class History:
     # sparse-only; None for nnm / nnm-corr
     loss_sparse  : list | None = None
     loss_low_rank: list | None = None
+    duality_gap_sparse   : list | None = None  # dgM, diagnostic (~0 in steady state)
+    duality_gap_low_rank : list | None = None  # dgX, equals duality_gap above
 
 
 
@@ -33,11 +35,11 @@ class FitResult:
 
     @property
     def duality_gap(self):
-        return self.history.duality_gap[-1]
+        return self.history.duality_gap[-1] if self.history.duality_gap else None
 
     @property
     def step_size(self):
-        return self.history.step_size[-1]
+        return self.history.step_size[-1] if self.history.step_size else None
 
     @property
     def cpu_time(self):
