@@ -2,7 +2,20 @@
 # ---------------------------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------------------------
-
+"""
+Tests for individual classes / functions in isolation.
+"""
+from .unit.test_active_set import (
+    TestActiveSetConstruct,
+    TestActiveSetReconstruct,
+    TestActiveSetUpdateFW,
+    TestActiveSetUpdateAway,
+    TestActiveSetOracleAway,
+    TestActiveSetGammaMax,
+    TestActiveSetPrune,
+    TestActiveSetInvariants,
+    TestActiveSetLongRunSequence,
+)
 
 # ---------------------------------------------------------------------------
 # Invariant tests
