@@ -74,7 +74,6 @@ In practice, you pick one of each:
 | **NNM** | $`\dfrac{1}{2}\lVert\mathbf{Z} - \mathbf{X}\rVert_F^2`$ | $`\lVert\mathbf{X}\rVert_* \le r`$ | Independent traits, isotropic noise |
 | **NNM-Sparse** | $`\dfrac{1}{2}\lVert\mathbf{Z} - \mathbf{X} - \mathbf{M}\rVert_F^2`$ | $`\lVert\mathbf{X}\rVert_* \le r`$, $`\lVert\mathbf{M}\rVert_1 \le l`$ | Sparse outliers or trait-specific effects |
 | **NNM-Corr**<sup>1</sup> | $`\dfrac{1}{2} \sum_{i=1}^P \lVert \mathbf{z}_{i} - \mathbf{x}_{i} \rVert_{\mathbf{A}^{-1}}^2`$ | $`\lVert\mathbf{X}\rVert_* \le r`$ | Correlated errors <br> _e.g._ traits share samples |
-| **RobustPCA** | $`\lVert\mathbf{X}\rVert_* + \lambda \lVert\mathbf{M}\rVert_1`$ | $`\mathbf{Z}=\mathbf{X} + \mathbf{M}`$ | Prefer a single $`\lambda`$ over two constraints |
 
 <sup>1</sup>For NNM-Corr,
 $`\lVert \mathbf{u} \rVert_{\mathbf{A}^{-1}}^2 = \mathbf{u}^{\mathsf{T}}\mathbf{A}^{-1}\mathbf{u}`$.
@@ -86,7 +85,6 @@ $`\lVert \mathbf{u} \rVert_{\mathbf{A}^{-1}}^2 = \mathbf{u}^{\mathsf{T}}\mathbf{
 | **FW** | Frank-Wolfe | NNM, NNM-Sparse, NNM-Corr |
 | **AFW** | Away-step Frank-Wolfe | NNM, NNM-Sparse, NNM-Corr |
 | **PGD** | Projected Gradient Descent | NNM, NNM-Sparse, NNM-Corr |
-| **IALM** | Inexact Augmented Lagrange Multiplier | RobustPCA |
 
 **Typical choices**
 
@@ -116,7 +114,7 @@ cd clorinn
 pip install -e .
 ```
 
-**Requirements:** Python ≥ 3.10, NumPy, SciPy.
+**Requirements:** Python ≥ 3.10, NumPy, SciPy, scikit-learn.
 
 ## Quick start
 

@@ -21,7 +21,6 @@ import logging
 
 from .utils.logs import CustomLogger
 from .utils import project
-from .tests.run import run_unittests
 
 mlogger = CustomLogger(__name__)
 
@@ -75,6 +74,7 @@ def main():
     mlogger.override_global_default_loglevel(log_level)
 
     if opts.test or opts.testmodules:
+        from .tests.run import run_unittests
         mlogger.debug("Calling logger from main")
         if opts.vverbose:
             verbosity = 2
