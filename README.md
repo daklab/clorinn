@@ -81,19 +81,19 @@ $`\lVert \mathbf{u} \rVert_{\mathbf{A}^{-1}}^2 = \mathbf{u}^{\mathsf{T}}\mathbf{
 
 <!-- ^{\mathsf{T}} \mathbf{A}^{-1} (\mathbf{z}_i - \mathbf{x}_i)`$ -->
 
-| Solvers | Algorithm | Models supported | Status |
-|:---|:---|:---|:---|
-| **FW** | Frank-Wolfe | NNM, NNM-Sparse, NNM-Corr | ✅ |
-| **AFW** | Away-step Frank-Wolfe | NNM, NNM-Sparse, NNM-Corr | 🔲 planned |
-| **PGD** | Projected Gradient Descent | NNM, NNM-Sparse, NNM-Corr | ✅ |
-| **IALM** | Inexact Augmented Lagrange Multiplier | RobustPCA | ✅ |
+| Solvers | Algorithm | Models supported |
+|:---|:---|:---|
+| **FW** | Frank-Wolfe | NNM, NNM-Sparse, NNM-Corr |
+| **AFW** | Away-step Frank-Wolfe | NNM, NNM-Sparse, NNM-Corr |
+| **PGD** | Projected Gradient Descent | NNM, NNM-Sparse, NNM-Corr |
+| **IALM** | Inexact Augmented Lagrange Multiplier | RobustPCA |
 
 **Typical choices**
 
 - Start with **NNM + FW** (default)
 - Use **NNM-Sparse** if a few entries dominate
 - Use **NNM-Corr** if traits share samples
-- Use **PGD → FW** for faster convergence on large problems
+- Use **PGD → AFW** for faster convergence on large problems
 
 ## What's new in v2.0.0
 
@@ -162,7 +162,7 @@ print(cov.repair_info)
 # {'n_iter': 12, 'converged': True, 'min_eig_input': -0.003, ...}
 ```
 
-### Hybrid solver (PGD → Frank-Wolfe)
+### Hybrid solver (PGD → Away Step FrankWolfe)
 
 ```python
 from clorinn.optimize import ProjectedGradientDescent, FrankWolfe
@@ -173,7 +173,7 @@ pgd = ProjectedGradientDescent(
     stop_criteria=('relative_loss', 'boundary_active'),
     verbose=1,
 )
-fw = FrankWolfe(model=model)
+afw = AwayStepFrankWolfe(model=model)
 
 fit_kwargs = {}
 if model == 'nnm-corr':
@@ -182,15 +182,14 @@ elif model == 'nnm-sparse':
     fit_kwargs['sparse_scale'] = 0.5
 
 pgd.fit(Z, radius=r, **fit_kwargs)
-fw.fit(Z, radius=r, X0=pgd.result.X, **fit_kwargs)
+afw.fit(Z, radius=r, X0=pgd.result.X, **fit_kwargs)
 ```
 
 ## Sampling covariance
 
-`SamplingCovariance` constructs and validates the N×N sampling covariance
-matrix A assembled from LD Score Regression intercepts
-(diagonal: univariate LDSC intercepts;
-off-diagonal: bivariate LDSC intercepts).
+`SamplingCovariance` constructs and validates the $N \times N$ 
+sampling covariance matrix $\mathbf{A}$ assembled from LD Score Regression intercepts
+(diagonal: univariate LDSC intercepts; off-diagonal: bivariate LDSC intercepts).
 
 ```python
 from clorinn.utils import SamplingCovariance
@@ -231,6 +230,7 @@ under `src/clorinn/tests/`:
 
 ```
 tests/
+    unit/         Tests for individual classes and methods in isolation
     regression/   Numerical regression fixtures (freeze solver traces)
     invariants/   Solver invariants (feasibility, monotonicity, gaps)
     theory/       Mathematical correctness (exact missingness, gradients)

@@ -384,12 +384,19 @@ class TestActiveSetOracleAway(unittest.TestCase):
 
 
     def test_returns_negative_inner_when_all_negative(self):
-        """Returns least-bad atom even when all inners are negative."""
+        """
+        When all non-zero atoms have <G, S_k> < 0 and there is no zero
+        atom, oracle returns the least-bad non-zero atom (its inner is
+        still negative). When a zero atom is present, the zero atom
+        wins instead — see test_zero_atom_wins_when_all_inner_negative.
+        """
         u = _unit(self.rng, self.n);  vt = _unit(self.rng, self.p)
+        # Boundary seed (no zero atom) followed by an all-FW-step build
         A = ActiveSet(radius = self.r, shape = (self.n, self.p))
         A.update_fw(u, vt, gamma = 1.0)
-        # update_fw stores (u, vt) as-is (no sign flip; that only happens in
-        # from_svd_factors). So S = -r * u @ vt^T and <G, S> = -r * u^T G vt.
+        self.assertFalse(A.has_zero_atom)
+        # update_fw stores (u, vt) as-is.
+        # So S = -r * u @ vt^T and <G, S> = -r * u^T G vt.
         # Pick G = +outer(u, vt), giving u^T G vt = 1 and <G, S> = -r < 0.
         G = np.outer(u, vt)
         k_aw, _, inner_aw = A.oracle_away(G)
@@ -399,9 +406,73 @@ class TestActiveSetOracleAway(unittest.TestCase):
 
     def test_empty_active_set_raises(self):
         """Empty active set raises RuntimeError."""
-        A = ActiveSet.from_svd(np.zeros((self.n, self.p)), radius = self.r)
+        A = ActiveSet(radius = self.r, shape = (self.n, self.p))
+        self.assertEqual(A.n_atoms, 0)
+        self.assertFalse(A.has_zero_atom)
         with self.assertRaises(RuntimeError):
             A.oracle_away(self.rng.standard_normal((self.n, self.p)))
+
+
+    def test_zero_atom_wins_when_all_inner_negative(self):
+        """
+        When the active set has a zero atom AND every non-zero atom has
+        <G, S_k> < 0, the zero atom is the away candidate (its inner is
+        0, which beats any negative value).
+        """
+        u = _unit(self.rng, self.n);  vt = _unit(self.rng, self.p)
+        # Interior seed: ||X0||_* < radius gives a zero atom.
+        X0 = 0.3 * self.r * np.outer(u, vt)    # ||X0||_* = 0.3 * r
+        A = ActiveSet.from_svd(X0, radius = self.r)
+        self.assertTrue(A.has_zero_atom)
+        self.assertEqual(A.n_atoms, 1)
+
+        # Pick G so that the single non-zero atom has negative inner.
+        # from_svd applies a sign flip: stored u_atom = -u, vt_atom = vt.
+        # S = -r * (-u) * vt^T = r * u * vt^T.
+        # <G, S> = r * u^T G vt. For G = +outer(u, vt), this is +r > 0.
+        # We want negative, so use G = -outer(u, vt), giving <G, S> = -r.
+        G = -np.outer(u, vt)
+        k_aw, alpha_aw, inner_aw = A.oracle_away(G)
+        self.assertIsNone(k_aw)
+        self.assertEqual(inner_aw, 0.0)
+        self.assertAlmostEqual(alpha_aw, A.alpha_zero_, places = 12)
+
+
+    def test_zero_atom_loses_when_a_nonzero_has_positive_inner(self):
+        """
+        When the zero atom is present but at least one non-zero atom has
+        <G, S_k> > 0, the non-zero atom wins (positive > 0 = zero atom's
+        inner).
+        """
+        u = _unit(self.rng, self.n);  vt = _unit(self.rng, self.p)
+        X0 = 0.3 * self.r * np.outer(u, vt)
+        A = ActiveSet.from_svd(X0, radius = self.r)
+        self.assertTrue(A.has_zero_atom)
+
+        # Make the stored atom's inner positive: G = -outer is negative
+        # for our atom convention, so flip sign back.
+        # Stored: S_atom = r * u * vt^T (after sign flip in from_svd).
+        # G = +outer(u, vt) gives <G, S> = +r > 0.
+        G = np.outer(u, vt)
+        k_aw, alpha_aw, inner_aw = A.oracle_away(G)
+        self.assertEqual(k_aw, 0)
+        self.assertGreater(inner_aw, 0.0)
+
+
+    def test_zero_seeded_from_svd_returns_zero_atom_not_raise(self):
+        """
+        from_svd(zero matrix) seeds an active set with a single zero
+        atom of weight 1. oracle_away on that returns is_zero=True.
+        """
+        A = ActiveSet.from_svd(np.zeros((self.n, self.p)), radius = self.r)
+        self.assertTrue(A.has_zero_atom)
+        self.assertEqual(A.n_atoms, 0)
+        k_aw, alpha_aw, inner_aw = A.oracle_away(
+            self.rng.standard_normal((self.n, self.p))
+        )
+        self.assertIsNone(k_aw)
+        self.assertEqual(inner_aw, 0.0)
+        self.assertAlmostEqual(alpha_aw, 1.0, places = 12)
 
 
 # ---------------------------------------------------------------------------

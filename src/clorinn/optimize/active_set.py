@@ -338,11 +338,13 @@ class ActiveSet:
     def oracle_away(self, G):
         """
         Find the worst active atom: the k that maximizes <G, S_k> over the
-        current non-zero active atoms.
+        current active set.
 
-        Zero atoms are not considered. S_zero = 0 gives <G, S_zero> = 0,
-        which can never exceed a positive maximum among non-zero atoms in
-        the regime where AFW makes meaningful progress.
+        The zero atom (if present) contributes <G, 0> = 0, so it is the away
+        candidate whenever every non-zero atom has <G, S_k> < 0. This is
+        informative: it signals to AFW that the FW direction should be taken,
+        because no previously-added atom is "worse than nothing" against the
+        current gradient.
 
         Parameters
         ----------
@@ -351,29 +353,44 @@ class ActiveSet:
 
         Returns
         -------
-        k_aw : int
-            Index of the worst atom in the non-zero atoms array.
+        k_aw : int | None
+            Index of the away atom in the non-zero atoms array, or None if
+            the away atom is the zero atom (or none is available).
         alpha_aw : float
-            Weight of that atom (used to compute gamma_max).
+            Weight of the away atom. Equals alpha_zero_ when k_aw is None.
         inner_aw : float
-            <G, S_{k_aw}>; used as part of the away duality gap.
-
+            <G, S_aw>. Zero when k_aw is None.
+    
         Raises
         ------
         RuntimeError
-            If the active set has no non-zero atoms (only the zero atom).
-        """
-        if self.n_atoms == 0:
-            raise RuntimeError(
-                "oracle_away called on an active set with no non-zero atoms; "
-                "AFW cannot take an away step. Caller must take the FW step."
-            )
+            If the active set is empty (no non-zero atoms and no zero atom).
+            AFW callers should ensure the active set is non-empty.
 
-        GVt    = G @ self.Vt_.T                                # (n, K)
-        inner  = -self.radius_ * np.einsum('ij,ij->j', self.U_, GVt)
-        k_aw     = int(np.argmax(inner))
-        alpha_aw = float(self.alpha_[k_aw])
-        inner_aw = float(inner[k_aw])
+        """
+        has_nonzero = self.n_atoms > 0
+        has_zero    = self.has_zero_atom
+
+        if not (has_nonzero or has_zero):
+            raise RuntimeError("Empty active set; no away atom available.")
+
+        k_aw     = None
+        alpha_aw = None
+        inner_aw = -np.inf
+
+        if has_nonzero:
+            GVt   = G @ self.Vt_.T
+            inner = -self.radius_ * np.einsum('ij,ij->j', self.U_, GVt)
+            k_aw     = int(np.argmax(inner))
+            alpha_aw = float(self.alpha_[k_aw])
+            inner_aw = float(inner[k_aw])
+
+        # Zero atom's inner is 0; it wins iff every non-zero inner is negative.
+        if has_zero and inner_aw <= 0.0:
+            k_aw     = None
+            alpha_aw = float(self.alpha_zero_)
+            inner_aw = 0.0
+
         return k_aw, alpha_aw, inner_aw
 
 

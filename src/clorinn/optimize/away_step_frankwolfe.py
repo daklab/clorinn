@@ -86,47 +86,40 @@ class AwayStepFrankWolfe(FrankWolfe):
 
     def _fw_X_block_update(self, G, iter_state):
         """
-        The core difference between FrankWolfe and AwayStepFrankWolfe.
-        Update X block only. Choose between the FW direction and the 
-        away direction based on which has the larger duality gap.
+        AFW X-block update.
+
+        history.duality_gap records dg_fw, the convergence certificate.
+        history.step_gap records the gap of the direction actually taken.
+        history.away_gap records dg_aw, the away step gap.
         """
         active = iter_state.active_set
  
         # FW direction (with negative-dg retry on power iteration)
         S_fw, D_fw, dg_fw = self._try_positive_dg(G, iter_state = iter_state)
- 
-        # Empty active set -> force FW (no away atom available).
+
+        take_fw = False
+        k_aw = None
+        dg_aw = 0.0
+
         if active.n_atoms == 0:
-            step_size, step_kind = self._take_fw_step(
-                iter_state, S_fw, D_fw, dg_fw,
-            )
-            self._maybe_prune(iter_state)
-            return StepInfo(
-                dg        = dg_fw,
-                step_size = step_size,
-                step_kind = step_kind,
-                step_gap  = dg_fw,
-                away_gap  = 0.0,
-            )
- 
-        # Away direction
-        k_aw, alpha_aw, inner_aw = active.oracle_away(G)
-        inner_X = float(np.sum(iter_state.X * G))
-        dg_aw   = inner_aw - inner_X
- 
-        # Direction choice (theory §6.3)
-        if dg_fw >= dg_aw:
-            step_size, step_kind = self._take_fw_step(
-                iter_state, S_fw, D_fw, dg_fw,
-            )
+            # Empty active set -> force FW (no away atom available).
+            take_fw = True
+        else:
+            # Choose direction
+            k_aw, alpha_aw, inner_aw = active.oracle_away(G)
+            inner_X = float(np.sum(iter_state.X * G))
+            dg_aw   = inner_aw - inner_X
+            take_fw = (k_aw is None) or (dg_fw >= dg_aw)
+
+        if take_fw:
+            step_size, step_kind = self._take_fw_step(iter_state, S_fw, D_fw, dg_fw)
             step_gap = dg_fw
         else:
-            step_size, step_kind = self._take_away_step(
-                iter_state, k_aw, dg_aw,
-            )
+            step_size, step_kind = self._take_away_step(iter_state, k_aw, dg_aw)
             step_gap = dg_aw
- 
+            
         self._maybe_prune(iter_state)
+
         return StepInfo(
             dg        = dg_fw,
             step_size = step_size,
