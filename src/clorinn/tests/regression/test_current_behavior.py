@@ -37,6 +37,45 @@ from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 
+def assert_allclose_mixed(testcase, actual, expected, *, rtol, atol, name="value", equal_nan = False):
+    """
+    np.testing.assert_allclose with additional worst-entry diagnostics.
+
+    Suppresses exception chaining so unittest does not print
+    'During handling of the above exception...'.
+    """
+    actual = np.asarray(actual)
+    expected = np.asarray(expected)
+
+    try:
+        np.testing.assert_allclose(actual, expected, rtol=rtol, atol=atol, equal_nan = equal_nan)
+    except AssertionError as err:
+        # If this is a shape/broadcasting failure, NumPy's message is already best.
+        if actual.shape != expected.shape:
+            raise testcase.failureException(str(err)) from None
+
+        diff = np.abs(actual - expected)
+        tol = atol + rtol * np.abs(expected)
+        d = diff - tol
+
+        # Ignore non-finite entries when locating the worst finite delta.
+        delta = np.where(np.isfinite(d), d, -np.inf)
+        if delta.size == 0:
+            raise testcase.failureException(str(err)) from None
+
+        idx = np.unravel_index(np.argmax(delta), delta.shape)
+
+        extra_msg = (
+            f"\n\nWorst offending entry at index {idx}:\n"
+            f"  actual   = {actual[idx]}\n"
+            f"  expected = {expected[idx]}\n"
+            f"  abs diff = {diff[idx]}\n"
+            f"  allowed  = {tol[idx]}\n"
+            f"  rtol     = {rtol}\n"
+            f"  atol     = {atol}"
+        )
+        raise testcase.failureException(str(err) + extra_msg) from None
+
 
 def _load(name):
     return np.load(os.path.join(FIXTURES_DIR, name), allow_pickle=False)
@@ -83,20 +122,20 @@ class _FWRegressionBase(unittest.TestCase):
         self.assertEqual(self.m.n_iter, int(self.f['n_iter']))
 
     def test_X_identical(self):
-        #np.testing.assert_array_equal(self.m.X, self.f['X'])
-        np.testing.assert_allclose(self.m.X, self.f['X'], rtol=self.rtol, atol=self.atol)
+        assert_allclose_mixed(self, self.m.X, self.f['X'], rtol=self.rtol, atol=self.atol)
 
     def test_fx_history_identical(self):
-        #np.testing.assert_array_equal(np.array(self.m.history.loss), self.f['fx'])
-        np.testing.assert_allclose(np.array(self.m.history.loss), self.f['fx'], rtol=self.rtol, atol=self.atol)
+        k = min(len(self.m.history.loss), len(self.f['fx']))
+        assert_allclose_mixed(self, np.array(self.m.history.loss)[:k], self.f['fx'][:k], rtol=self.rtol, atol=self.atol)
 
     def test_dg_history_identical(self):
-        #np.testing.assert_array_equal(np.array(self.m.history.duality_gap), self.f['dg'])
-        np.testing.assert_allclose(np.array(self.m.history.duality_gap), self.f['dg'], rtol=self.rtol, atol=self.atol)
+        # first dg can be np.inf
+        k = min(len(self.m.history.duality_gap), len(self.f['dg']))
+        assert_allclose_mixed(self, np.array(self.m.history.duality_gap)[1:k], self.f['dg'][1:k], rtol=self.rtol, atol=self.atol)
 
     def test_steps_history_identical(self):
-        #np.testing.assert_array_equal(np.array(self.m.history.step_size), self.f['steps'])
-        np.testing.assert_allclose(np.array(self.m.history.step_size), self.f['steps'], rtol=self.rtol, atol=self.atol)
+        k = min(len(self.m.history.step_size), len(self.f['steps']))
+        assert_allclose_mixed(self, np.array(self.m.history.step_size)[:k], self.f['steps'][:k], rtol=self.rtol, atol=self.atol)
 
     def test_history_length(self):
         """All histories have length n_iter + 1 (iteration 0 is included)."""
@@ -108,15 +147,12 @@ class _FWRegressionBase(unittest.TestCase):
     def test_M_identical(self):
         if 'M' not in self.f:
             self.skipTest("not a sparse fixture")
-        #np.testing.assert_array_equal(self.m.M, self.f['M'])
-        np.testing.assert_allclose(self.m.M, self.f['M'], rtol=self.rtol, atol=self.atol)
+        assert_allclose_mixed(self, self.m.M, self.f['M'], rtol=self.rtol, atol=self.atol)
 
     def test_M_absent_for_non_sparse(self):
         if 'M' in self.f:
             self.skipTest("sparse fixture")
         self.assertIsNone(self.m.M)
-        #with self.assertRaises(AttributeError):
-        #    _ = self.m.M
 
 
 # ---------------------------------------------------------------------------
@@ -195,12 +231,11 @@ class _PGDRegressionBase(unittest.TestCase):
         self.assertEqual(self.pgd.n_iter, int(self.f['n_iter']))
 
     def test_X_identical(self):
-        #np.testing.assert_array_equal(self.pgd.X, self.f['X'])
-        np.testing.assert_allclose(self.pgd.X, self.f['X'], rtol=self.rtol, atol=self.atol)
+        assert_allclose_mixed(self, self.pgd.X, self.f['X'], rtol=self.rtol, atol=self.atol)
 
     def test_fx_history_identical(self):
-        #np.testing.assert_array_equal(np.array(self.pgd.history.loss), self.f['fx'])
-        np.testing.assert_allclose(np.array(self.pgd.history.loss), self.f['fx'], rtol=self.rtol, atol=self.atol)
+        k = min(len(self.pgd.history.loss), len(self.f['fx']))
+        assert_allclose_mixed(self, np.array(self.pgd.history.loss)[:k], self.f['fx'][:k], rtol=self.rtol, atol=self.atol)
 
     def test_converged_in_interior(self):
         self.assertEqual(self.pgd.converged,
@@ -214,7 +249,7 @@ class _PGDRegressionBase(unittest.TestCase):
     def test_M_identical(self):
         if 'M' not in self.f:
             self.skipTest("not a sparse fixture")
-        np.testing.assert_allclose(self.pgd.M, self.f['M'],
+        assert_allclose_mixed(self, self.pgd.M, self.f['M'],
                                    rtol=self.rtol, atol=self.atol)
 
     def test_M_absent_for_non_sparse(self):
