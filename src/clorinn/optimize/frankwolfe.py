@@ -8,7 +8,7 @@ from .objectives import make_objective
 from .svd import nuclear_norm_oracle
 from .result import History, FitResult
 from .config import SolverConfig
-from .state import IterState, StopReason
+from .state import IterState, StopReason, StepInfo
 from ..utils.logs import get_loglevel, CustomLogger
 from ..utils.sampling_covariance import SamplingCovariance
 
@@ -221,7 +221,6 @@ class FrankWolfe():
  
     def _try_positive_dg(self, G, *, iter_state):
         '''
-        Call ``oracle_fn(G, *args, warm_start_uv=False, svd_max_iter=...)``
         Call `_oracle_nucnorm`, build the descent direction D = anchor - S,
         compute dg = <D, G>, and retry with larger SVD iteration budgets 
         if dg < 0 (power iteration only).
@@ -230,13 +229,9 @@ class FrankWolfe():
         Retrying with more power iterations (for method='power') typically
         resolves the issue.
 
-        After this returns, iter_state.svd_u / svd_vt hold the singular
-        vectors of the accepted oracle call.
+        After this returns, iter_state.svd_u / iter_state.svd_vt hold the 
+        singular vectors of the accepted oracle call.
 
-        AFW note: this helper is for the *FW direction* only. The AFW
-        away direction has D_aw = S_aw - X with S_aw drawn from the active
-        set (not the SVD), so it does not need this helper.
- 
         Parameters
         ----------
         G : np.ndarray
@@ -353,7 +348,7 @@ class FrankWolfe():
         D : np.ndarray
             Descent direction.
         iter_state: IterState
-            Required for last step size.
+            Required only for logging.
         gamma_max : float, default=1.0
             Upper clamp on the step size.
  
@@ -375,66 +370,52 @@ class FrankWolfe():
                 "iteration if 'step_size' is in stop_criteria."
             )
             ss = 0.0
-            #ss = iter_state.last_step_size
         return ss
  
  
     # ------------------------------------------------------------------
     # Frank-Wolfe step functions
     # ------------------------------------------------------------------
- 
-    def _fw_one_step_nnm(self, iter_state):
+
+    def _fw_X_block_update(self, G, iter_state):
         '''
-        Single Frank-Wolfe step for the 'nnm' and 'nnm-corr' models.
+        All models update X separately from M.
+        
+        AwayStepFrankWolfe (AFW) overrides this class only.
+        M-block update is identical.
+
+        After this returns, iter_state.X hold the new iterate.
 
         Uses the convention D = X - S so that the update is:
             X_new = X - step * D  =  (1 - step) * X + step * S
  
-        Parameters
-        ----------
-        X : np.ndarray - current iterate.
-
-        Updates
-        -------
-        iter_state : IterState
- 
-        Returns
-        -------
-        G    : np.ndarray - gradient at X
-        dg   : float      - duality gap
-        step : float      - step size used
         '''
-        # 1. Gradient
-        G = self.obj_.gradient(iter_state.X)
 
-        # 2. Linear oracle + descent direction + duality gap (with negative-dg guard)
+        # 1. Linear oracle + descent direction + duality gap (with negative-dg guard)
         S, D, dg = self._try_positive_dg(G, iter_state = iter_state)
 
-        # 3. Step size
+        # 2. Step size
         step_size = self._compute_step_size(dg, D, iter_state)
 
-        # 4. Update
+        # 3. Update
         iter_state.X = iter_state.X - step_size * D
-        iter_state.last_step_size = step_size
 
-        return G, dg, step_size
+        return StepInfo(dg = dg, step_size = step_size)
+
+ 
+    def _fw_one_step_nnm(self, iter_state):
+        '''
+        Single Frank-Wolfe step for the 'nnm' and 'nnm-corr' models.
+        '''
+        G = self.obj_.gradient(iter_state.X)
+        info = self._fw_X_block_update(G, iter_state)
+
+        return info
  
  
     def _fw_one_step_nnm_sparse(self, iter_state):
         '''
         Single Frank-Wolfe step for the 'nnm-sparse' model.
- 
-        Uses the convention D = X - S so that the update is:
-            X_new = X - step * D  =  (1 - step) * X + step * S
- 
-        Parameters
-        ----------
-        X : np.ndarray - current low-rank iterate.
-        M : np.ndarray - current sparse iterate.
- 
-        Updates
-        -------
-        iter_state : IterState
  
         Returns
         -------
@@ -443,33 +424,29 @@ class FrankWolfe():
         dgM  : float      - M-block duality gap (diagnostic, ~0)
         step : float      - step size used
         '''
-        # 1. Gradient at the joint iterate
         G = self.obj_.gradient(iter_state.X + iter_state.M)
+        info = self._fw_X_block_update(G, iter_state) 
 
-        # 2. X-block linear oracle + descent direction + duality gap (with negative-dg guard)
-        SX, DX, dgX = self._try_positive_dg(G, iter_state = iter_state)
+        # M-block diagnostic
+        S_M = self._oracle_l1norm(G)
+        D_M = iter_state.M - S_M
+        info.dg_sparse = float(np.sum(D_M * G))
 
-        # 3. M-block: closed-form l1 oracle, gM diagnostic only (no retry)
-        SM = self._oracle_l1norm(G)
-        DM = iter_state.M - SM
-        dgM = float(np.sum(DM * G))
-
-        # 4. Step size from the X-block gap
-        step_size = self._compute_step_size(dgX, DX, iter_state)
-
-        # 5. Update X, then exact projection for M
-        iter_state.X = iter_state.X - step_size * DX
+        # M-block: closed-form l1 projection at the new X
         iter_state.M = self.obj_.project_sparse(iter_state.X)
-        iter_state.last_step_size = step_size
 
-        return G, dgX, dgM, step_size
+        return info
 
 
     # ------------------------------------------------------------------
     # Stopping criterion
     # ------------------------------------------------------------------
 
-    def _do_stop(self, fx_hist, dg_hist, st_hist, iter_state):
+    def _do_stop(self, iter_state, iter_history):
+
+        fx_hist = iter_history.loss
+        dg_hist = iter_history.duality_gap
+        st_hist = iter_history.step_size
 
         def _safe_relative_change(x1, x0, eps=1e-8):
             '''
@@ -526,14 +503,64 @@ class FrankWolfe():
     def _init_iter_state(self, X0):
         """
         Build the initial IterState for the iteration loop.
-
-        Subclasses override this to seed additional iteration state
-        (e.g. AwayStepFrankWolfe seeds the active set from X0). The base
-        FW class only sets X and (for sparse) M.
         """
         X = np.zeros_like(self.obj_.Y_) if X0 is None else X0.copy()
         M = self.obj_.project_sparse(X) if self.model_ == 'nnm-sparse' else None
-        return IterState(X = X, M = M)
+        iter_state = IterState(X = X, M = M)
+        iter_state.istep = 0
+        return iter_state
+
+
+    # ------------------------------------------------------------------
+    # Hooks to record history
+    # ------------------------------------------------------------------
+
+    def _init_iter_history(self, iter_state):
+        '''
+        Build the initial History which will be updated every iteration 
+        and finally attached to FitResult.
+        '''
+        history = History()
+
+        history.duality_gap = [np.inf]
+        history.step_size   = [1.0]
+        history.cpu_time    = [0.0]
+
+        if self.model_ in ('nnm', 'nnm-corr'):
+            history.loss = [self.obj_.value(iter_state.X)]
+
+        elif self.model_ == 'nnm-sparse':
+            history.loss          = [self.obj_.value(iter_state.X + iter_state.M)]
+            history.loss_sparse   = [self.obj_.value(iter_state.M)]
+            history.loss_low_rank = [self.obj_.value(iter_state.X)]
+            history.duality_gap_sparse = [np.inf]
+
+        return history
+
+
+    def _append_iter_history(self, history, iter_state, info, cpu_time):
+        """
+        Append to history after every iteration.
+        """
+        history.duality_gap.append(info.dg)
+        history.step_size.append(info.step_size)
+        history.cpu_time.append(cpu_time)
+
+        if self.model_ in ('nnm', 'nnm-corr'):
+            history.loss.append(self.obj_.value(iter_state.X))
+
+        elif self.model_ == 'nnm-sparse':
+            if info.dg_sparse is None:
+                raise RuntimeError(
+                    f"dg_sparse is None while appending to iter_history for model {self.model_}."
+                )
+            history.loss.append(self.obj_.value(iter_state.X + iter_state.M))
+            history.loss_sparse.append(self.obj_.value(iter_state.M))
+            history.loss_low_rank.append(self.obj_.value(iter_state.X))
+            history.duality_gap_sparse.append(info.dg_sparse)
+
+        return
+
 
     # ------------------------------------------------------------------
     # Public interface
@@ -630,77 +657,41 @@ class FrankWolfe():
         # ---------------------
         # Initialize history
         # ---------------------
-        fx_hist = [self.obj_.value(iter_state.X)]
-        dg_hist = [np.inf]
-        st_hist = [1.0]
-        cpu_time_hist = [1e-8] # do not use 0 to avoid log10 error.
-
-        iter_state.istep = 0
-
-        if self.model_ == 'nnm-sparse':
-            fx_hist  = [self.obj_.value(iter_state.X + iter_state.M)]
-            fm_hist  = [self.obj_.value(iter_state.M)]
-            fl_hist  = [self.obj_.value(iter_state.X)]
-            dgm_hist = [np.inf] 
-
-        cpu_time_old = time.process_time()
+        iter_history = self._init_iter_history(iter_state)
 
         # ---------------------
         # Steps 1, ..., max_iter
         # ---------------------
+        cpu_time_old = time.process_time()
         for i in range(self.cfg_.max_iter):
 
             iter_state.istep += 1
             self.logger_.debug(f"Iteration {iter_state.istep}.")
 
             if self.model_ in ('nnm', 'nnm-corr'):
-                G, dg, step_size = self._fw_one_step_nnm(iter_state)
-                fx = self.obj_.value(iter_state.X)
-
+                info = self._fw_one_step_nnm(iter_state)
             elif self.model_ == 'nnm-sparse':
-                G, dg, dgM, step_size = self._fw_one_step_nnm_sparse(iter_state)
-                fx = self.obj_.value(iter_state.X + iter_state.M)
-                fm = self.obj_.value(iter_state.M)
-                fl = self.obj_.value(iter_state.X)
+                info = self._fw_one_step_nnm_sparse(iter_state)
 
-            self.logger_.debug(f"Step size {step_size:.3f}. Duality Gap {dg:g}.")
+            self.logger_.debug(f"Step size {info.step_size:.3f}. Duality Gap {info.dg:g}.")
 
-            # Append iteration history
             cpu_time = time.process_time()
-            cpu_time_hist.append(cpu_time - cpu_time_old)
+            cpu_time_elapsed = cpu_time - cpu_time_old
             cpu_time_old = cpu_time
-            fx_hist.append(fx)
-            dg_hist.append(dg)
-            st_hist.append(step_size)
 
-            if self.model_ == 'nnm-sparse':
-                fm_hist.append(fm)
-                fl_hist.append(fl)
-                dgm_hist.append(dgM)
+            self._append_iter_history(iter_history, iter_state, info, cpu_time_elapsed)
 
             if self.prog_step_skip_ is not None:
                 if (iter_state.istep == 1) or (iter_state.istep % self.prog_step_skip_ == 0):
-                    self.logger_.info(f"Iteration {iter_state.istep}. Step size {step_size:.3f}. Duality Gap {dg:g}")
+                    self.logger_.info(f"Iteration {iter_state.istep}. Step size {info.step_size:.3f}. Duality Gap {info.dg:g}")
 
-            if self._do_stop(fx_hist, dg_hist, st_hist, iter_state):
+            if self._do_stop(iter_state, iter_history):
                 break
-
 
         self.logger_.info(
             f"Stopping at iteration {iter_state.istep}. "
-            f"Step size {step_size:.3f}. Duality Gap {dg:g}")
+            f"Step size {info.step_size:.3f}. Duality Gap {info.dg:g}")
         self.logger_.info(iter_state.stop_reason.message)
-
-        history = History(
-            loss          = fx_hist,
-            duality_gap   = dg_hist,
-            step_size     = st_hist,
-            cpu_time      = cpu_time_hist,
-            loss_sparse   = fm_hist if self.model_ == 'nnm-sparse' else None,
-            loss_low_rank = fl_hist if self.model_ == 'nnm-sparse' else None,
-            duality_gap_sparse   = dgm_hist if self.model_ == 'nnm-sparse' else None,
-            duality_gap_low_rank = dg_hist  if self.model_ == 'nnm-sparse' else None,
-        )
 
         metrics = {
             'nuclear_norm': float(np.linalg.norm(iter_state.X, 'nuc')),
@@ -715,7 +706,7 @@ class FrankWolfe():
         self.result_  = FitResult(
             X           = iter_state.X,
             M           = iter_state.M if self.model_ == 'nnm-sparse' else None,
-            history     = history,
+            history     = iter_history,
             n_iter      = iter_state.istep,
             converged   = iter_state.stop_reason != StopReason.MAX_ITER,
             stop_reason = iter_state.stop_reason,

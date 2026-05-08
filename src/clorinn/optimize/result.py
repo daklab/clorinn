@@ -14,7 +14,6 @@ class History:
     loss_sparse  : list | None = None
     loss_low_rank: list | None = None
     duality_gap_sparse   : list | None = None  # dgM, diagnostic (~0 in steady state)
-    duality_gap_low_rank : list | None = None  # dgX, equals duality_gap above
     # AFW only; None for plain FW
     step_kind        : list | None = None    # 'fw' | 'away' | 'drop' per iteration
     n_atoms_active   : list | None = None    # active-set size per iteration

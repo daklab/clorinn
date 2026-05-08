@@ -3,7 +3,6 @@ import numpy as np
 from enum import Enum, auto
 
 
-
 class StopReason(Enum):
     MAX_ITER      = auto()
     DUALITY_GAP   = auto()
@@ -11,7 +10,6 @@ class StopReason(Enum):
     RELATIVE_LOSS = auto()
     RELATIVE_DG   = auto()
     BOUNDARY_ACTIVE = auto()
-
 
     @property
     def message(self):
@@ -24,7 +22,6 @@ class StopReason(Enum):
             self.BOUNDARY_ACTIVE: "Nuclear norm constraint active. Ready for Frank-Wolfe."
         }
         return stop_messages[self]
-
 
 
 @dataclass
@@ -41,7 +38,6 @@ class IterState:
     X               : np.ndarray
     M               : np.ndarray | None = None
     istep           : int               = 0
-    last_step_size  : float             = 1.0
     svd_u           : np.ndarray | None = None
     svd_vt          : np.ndarray | None = None
     svd_n_iter      : int | None        = None
@@ -51,3 +47,21 @@ class IterState:
     # to import active_set.py (avoids any potential circular import).
     active_set      : 'ActiveSet | None' = None
     last_step_kind  : str | None         = None
+
+
+@dataclass
+class StepInfo:
+    """
+    Per-iteration step output. Returned by the per-step methods to the
+    fit() loop, then forwarded to _append_iter_history.
+
+    Base FW populates dg, step_size, dg_sparse. AFW additionally
+    populates step_kind, step_gap, away_gap.
+    """
+    dg          : float
+    step_size   : float
+    dg_sparse   : float | None  = None    # sparse model only
+    # AFW-only
+    step_kind   : str   | None  = None    # 'init' | 'fw' | 'away' | 'drop'
+    step_gap    : float | None  = None    # numerator of chosen line search
+    away_gap    : float | None  = None    # diagnostic / direction-choice
