@@ -71,14 +71,14 @@ os.makedirs(FIXTURES_DIR, exist_ok=True)
 # Shared problem  (fixed seeds)
 # ---------------------------------------------------------------------------
 
-def _build_problem():
+def _build_problem(n=15, p=300):
     """
     n=15 traits, p=300 SNPs, k=4 latent factors, Q=2 trait blocks.
     Small enough for fast test runs; non-trivial enough that the solver
     takes more than one step on most paths.
     """
     np.random.seed(0)
-    n, p, k, Q = 15, 300, 4, 2
+    k, Q = 4, 2
     Z, _, _, *_ = toy_data.effect_size(
         n, p, k, Q,
         h2=0.4, g2=0.2, aq=0.6, a0=0.2, nsample=8000,
@@ -284,10 +284,14 @@ GENERATORS = [
 
 def main():
     print(f"Writing fixtures to: {FIXTURES_DIR}\n")
-    prob = _build_problem()
+    prob_n15 = _build_problem(n=15, p=300)
+    prob_n50 = _build_problem(n=50, p=1000)
     for gen in GENERATORS:
         print(f"[{gen.__name__}]  {gen.__doc__.strip()}")
-        gen(prob)
+        if gen.__name__ in ("gen_fw_nnm", "gen_fw_nnm_mask"):
+            gen(prob_n50)
+        else:
+            gen(prob_n15) 
         print()
     print(f"Done. {len(GENERATORS)} fixtures written.")
 

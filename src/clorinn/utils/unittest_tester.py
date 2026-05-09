@@ -68,7 +68,7 @@ class UnittestResult(unittest.TextTestResult):
     def __init__(self, stream, descriptions, verbosity):
         super().__init__(stream, descriptions, verbosity)
         level = logging.getLogger(project.get_name()).getEffectiveLevel()
-        self._logger = CustomLogger(__name__, level=level)
+        self.logger_ = CustomLogger(__name__, level=level)
 
     def getDescription(self, test):
         """
@@ -89,29 +89,29 @@ class UnittestResult(unittest.TextTestResult):
     def startTest(self, test):
         unittest.TestResult.startTest(self, test)  # skip TextTestResult's stream write
         if self.showAll:
-            self._logger.info(f"{self.getDescription(test)} ... start")
+            self.logger_.info(f"{self.getDescription(test)} ... start")
 
     def addSuccess(self, test):
         super(unittest.TextTestResult, self).addSuccess(test)
         if self.showAll:
-            self._logger.info(f"{self.getDescription(test)} ... PASS")
+            self.logger_.info(f"{self.getDescription(test)} ... PASS")
         elif self.dots:
-            self._logger.info(f"PASS")
+            self.logger_.info(f"PASS")
 
     def addSkip(self, test, reason):
         super(unittest.TextTestResult, self).addSkip(test, reason)
         if self.showAll:
-            self._logger.info(f"{self.getDescription(test)} ... skipped '{reason}'")
+            self.logger_.info(f"{self.getDescription(test)} ... skipped '{reason}'")
         elif self.dots:
-            self._logger.info(f"skipped '{reason}'")
+            self.logger_.info(f"skipped '{reason}'")
 
     def addFailure(self, test, err):
         super(unittest.TextTestResult, self).addFailure(test, err)
-        self._logger.error(f"{self.getDescription(test)} ... FAIL")
+        self.logger_.error(f"{self.getDescription(test)} ... FAIL")
 
     def addError(self, test, err):
         super(unittest.TextTestResult, self).addError(test, err)
-        self._logger.error(f"{self.getDescription(test)} ... ERROR")
+        self.logger_.error(f"{self.getDescription(test)} ... ERROR")
 
 
 class MTestProgram(unittest.TestProgram):

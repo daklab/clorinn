@@ -22,7 +22,6 @@ class run_once(object):
     def __init__(self, func):
         functools.update_wrapper(self, func)
         self.func = func
-        #self.logger = CustomLogger(__name__)
 
 
     def __call__(self, instance, *args, **kwargs):
@@ -30,12 +29,8 @@ class run_once(object):
         fname = self.func.__name__
         rname = f"{fname}_has_run"
         if not hasattr(instance, rname):
-            #self.logger.debug (f"Running {instance.__class__.__name__}.{fname}")
             self.func(instance, *args, **kwargs)
             setattr(instance, rname, True)
-        #else:
-        #    self.logger.debug (f"Skipping {fname} in {instance.__class__.__name__}")
-        #self.func(instance, *args, **kwargs)
         return
 
 

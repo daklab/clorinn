@@ -292,11 +292,11 @@ class FrankWolfe():
         if dg >= -noise_tol:
             return S, D, max(dg, 0.0)
 
-        self.logger_.warn(f"Iteration {iter_state.istep}. Duality gap < 0 ({dg:g}, noise tolerance = {noise_tol:g})")
+        self.logger_.warning(f"Iteration {iter_state.istep}. Duality gap < 0 ({dg:g}, noise tolerance = {noise_tol:g})")
         if self.cfg_.svd_method != 'power':
             return S, D, dg
  
-        self.logger_.warn("Retrying SVD power iteration with larger budget.")
+        self.logger_.warning("Retrying SVD power iteration with larger budget.")
         svd_max_iter = self.cfg_.svd_max_iter * 2 if self.cfg_.svd_max_iter is not None else 100
         for n_rep in range(1, 6):
 
@@ -309,7 +309,7 @@ class FrankWolfe():
                 svd_max_iter  = svd_max_iter)
             D = iter_state.X - S
             dg = np.sum(D * G)
-            self.logger_.warn(
+            self.logger_.warning(
                 f"Power iteration trial {n_rep}. "
                 f"dg = {dg:g}, n_iter = {iter_state.svd_n_iter}, max_iter = {svd_max_iter}"
             )
@@ -317,7 +317,7 @@ class FrankWolfe():
                 return S, D, max(dg, 0.0)
             svd_max_iter *= 2
  
-        self.logger_.warn(
+        self.logger_.warning(
             f"Power iteration could not recover non-negative dg "
             f"({dg:g}, noise tol = {noise_tol:g})."
         )
@@ -359,12 +359,12 @@ class FrankWolfe():
         denom = self.obj_.step_denom(D)
 
         if not np.isfinite(denom) or denom == 0.0:
-            self.logger_.warn(f"Step size denominator is {denom:g} at iteration {iter_state.istep}. Returning zero step.")
+            self.logger_.warning(f"Step size denominator is {denom:g} at iteration {iter_state.istep}. Returning zero step.")
             return 0.0
 
         ss  = min(dg / denom, gamma_max)
         if ss < 0:
-            self.logger_.warn(
+            self.logger_.warning(
                 f"Step size < 0 ({ss:g}) at iteration {iter_state.istep}. "
                 "Returning zero step; the algorithm will stop on this "
                 "iteration if 'step_size' is in stop_criteria."

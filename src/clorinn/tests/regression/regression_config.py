@@ -12,7 +12,8 @@ when you deliberately modify solver behavior.
 FW_CONFIG = dict(
     max_iter=2000,
     svd_method='left-gram',
-    stop_criteria=['duality_gap', 'step_size', 'relative_loss', 'relative_dg'],
+    stop_criteria=('duality_gap',),
+    #stop_criteria=('duality_gap', 'step_size', 'relative_loss', 'relative_dg'),
     tol=1e-4,
     step_tol=1e-4,
     rel_tol=1e-8,

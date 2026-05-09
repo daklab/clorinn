@@ -100,6 +100,7 @@ class _FWRegressionBase(unittest.TestCase):
 
     def test_n_iter(self):
         if STRICT_REGRESSION:
+            self.logger_.warning(f"Running strict regression for {self.__class__.__name__}")
             self.assertEqual(self.m.n_iter, int(self.f['n_iter']))
         else:
             self.assertLessEqual(abs(self.m.n_iter - int(self.f['n_iter'])), int(0.20 * int(self.f['n_iter'])))
@@ -246,6 +247,8 @@ class _PGDRegressionBase(unittest.TestCase):
         assert_allclose_print_worst_entry(self, actual, expected, rtol=rtol, atol=atol, name=name or quantity)
 
     def test_n_iter(self):
+        if STRICT_REGRESSION:
+            self.logger_.warning(f"Running strict regression for {self.__class__.__name__}")
         self.assertEqual(self.pgd.n_iter, int(self.f['n_iter']))
 
     def test_X_identical(self):

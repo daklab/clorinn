@@ -177,7 +177,8 @@ class CustomLogger(logging.getLoggerClass()):
         self.logger.debug(msg, extra=extra)
 
 
-    def warn(self, msg, extra=None):
+    #def warn(self, msg, extra=None):
+    def warning(self, msg, extra=None):
         self.logger.warning(msg, extra=extra)
 
 
