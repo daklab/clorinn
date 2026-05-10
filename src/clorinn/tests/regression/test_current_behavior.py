@@ -44,8 +44,7 @@ import numpy as np
 from clorinn.utils import SamplingCovariance
 from clorinn.optimize import FrankWolfe, ProjectedGradientDescent
 from clorinn.utils.logs import CustomLogger
-from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT
-from clorinn.tests.regression.regression_tolerance import _tol
+from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT, PORTABLE_TOLERANCE_RULES
 from clorinn.tests.regression.regression_helper import assert_allclose_print_worst_entry
 
 STRICT_REGRESSION = os.environ.get("CLORINN_STRICT_REGRESSION", "0") == "1"
@@ -54,6 +53,24 @@ FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 def _load(name):
     return np.load(os.path.join(FIXTURES_DIR, name), allow_pickle=False)
 
+def _tol(model, solver, quantity, is_masked):
+    """
+    Return (rtol, atol) for regression tests.
+
+    In strict mode, use near-exact trajectory comparison.
+    In portable mode, use tolerances calibrated to observed
+    BLAS/LAPACK/NumPy/SciPy drift across machines.
+    """
+    if STRICT_REGRESSION:
+        return (1e-12, 1e-12)
+
+    key = (solver, model, is_masked, quantity)
+    for pattern, tol in PORTABLE_TOLERANCE_RULES:
+        if all(p == "*" or p == k for p, k in zip(pattern, key)):
+            return tol
+
+    # The trailing ("*","*","*","*") catch-all guarantees a match.
+    raise RuntimeError(f"no _TOL_RULES entry for {key!r}")  # unreachable
 
 # ---------------------------------------------------------------------------
 # FrankWolfe regression base
@@ -95,7 +112,7 @@ class _FWRegressionBase(unittest.TestCase):
 
     def _assert_close(self, actual, expected, quantity, name=None):
         is_masked = "mask" in self.fixture_name
-        rtol, atol = _tol(self.model, "fw", quantity, is_masked, STRICT_REGRESSION)
+        rtol, atol = _tol(self.model, "fw", quantity, is_masked)
         assert_allclose_print_worst_entry(self, actual, expected, rtol=rtol, atol=atol, name=name or quantity)
 
     def test_n_iter(self):
@@ -243,7 +260,7 @@ class _PGDRegressionBase(unittest.TestCase):
 
     def _assert_close(self, actual, expected, quantity, name=None):
         is_masked = "mask" in self.fixture_name
-        rtol, atol = _tol(self.model, "pgd", quantity, is_masked, STRICT_REGRESSION)
+        rtol, atol = _tol(self.model, "pgd", quantity, is_masked)
         assert_allclose_print_worst_entry(self, actual, expected, rtol=rtol, atol=atol, name=name or quantity)
 
     def test_n_iter(self):
