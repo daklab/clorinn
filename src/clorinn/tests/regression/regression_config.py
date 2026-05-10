@@ -29,7 +29,7 @@ PGD_CONFIG = dict(
 )
 
 # Constraints
-R_NUC   = 60.0   # nuclear-norm radius (active: R_NUC < sv_1(Y) ≈ 146)
+R_NUC   = 100.0  # nuclear-norm radius (active: R_NUC < sv_1(Y) ≈ 146)
 L1_MULT = 0.5    # l1 multiplier passed to fit() as r=(R_NUC, L1_MULT)
 
 # Portable tolerances

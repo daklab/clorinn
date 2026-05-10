@@ -285,11 +285,11 @@ GENERATORS = [
 def main():
     print(f"Writing fixtures to: {FIXTURES_DIR}\n")
     prob_n15 = _build_problem(n=15, p=300)
-    prob_n50 = _build_problem(n=50, p=1000)
+    prob_n20 = _build_problem(n=20, p=500)
     for gen in GENERATORS:
         print(f"[{gen.__name__}]  {gen.__doc__.strip()}")
         if gen.__name__ in ("gen_fw_nnm", "gen_fw_nnm_mask"):
-            gen(prob_n50)
+            gen(prob_n20)
         else:
             gen(prob_n15) 
         print()
