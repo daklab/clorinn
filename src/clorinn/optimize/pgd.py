@@ -1,12 +1,14 @@
 # Author: Saikat Banerjee
 # License: BSD 3 clause
 
+import logging
 import numpy as np
+
 from .objectives import make_objective
 from .projections import NuclearNormProjection
 from .result import History, FitResult
 from .state import StopReason
-from ..utils.logs import get_loglevel, CustomLogger
+from ..utils.logs import get_logger
 from ..utils.sampling_covariance import SamplingCovariance 
 
 class ProjectedGradientDescent():
@@ -62,15 +64,16 @@ class ProjectedGradientDescent():
         Number of steps skipped between each printed step
         if `verbose = 1`.
 
-    verbose : int, default=1
-        Controls the verbosity of solver output.  Three levels are
+    verbose : int or None, default=None
+        Controls the verbosity of solver output.  Three levels (or None) are
         recognised:
-            0  Silent.  Only warnings and errors are reported.
-               Equivalent to logging.WARN.
-            1  Progress.  Equivalent to logging.INFO.
-               Logs iteration count, step size, and duality gap at convergence.
-            2  Debug.  Equivalent to logging.DEBUG.
-               Logs all debugging outputs.
+            0     Silent.  Only warnings and errors are reported.
+                  Equivalent to logging.WARN.
+            1     Progress.  Equivalent to logging.INFO.
+                  Logs iteration count, step size, and duality gap at convergence.
+            2     Debug.  Equivalent to logging.DEBUG.
+                  Logs all debugging outputs.
+            None  Inherit loglevel, do not change anything.
         Higher values are treated as 2.
     """
  
@@ -80,7 +83,10 @@ class ProjectedGradientDescent():
                  simplex_method = 'sort',
                  stop_criteria=('relative_loss',),
                  print_skip = None,
-                 verbose = 1):
+                 verbose = None):
+
+        self.logger_ = get_logger(__name__, verbose=verbose, scope="solver")
+
         self.model_          = model
         self.max_iter_       = max_iter
         self.rel_tol_        = rel_tol
@@ -89,16 +95,13 @@ class ProjectedGradientDescent():
         self.prog_step_skip_ = print_skip
 
         self.prog_step_skip_ = print_skip
-        if verbose > 0 and self.prog_step_skip_ is None:
-            if verbose == 1:
-                self.prog_step_skip_ = max(1, int(self.max_iter_ / 10))
-            elif verbose > 1:
-                self.prog_step_skip_ = 1
 
-        # set logger for this class
-        loglevel = get_loglevel(verbose)
-        self.logger_ = CustomLogger(__name__, level = loglevel)
-        self.logger_.override_subsystem_loglevel(loglevel)
+        if self.prog_step_skip_ is None and self.logger_.isEnabledFor(logging.INFO):
+            if self.logger_.isEnabledFor(logging.DEBUG):
+                self.prog_step_skip_ = 1
+            else:
+                self.prog_step_skip_ = max(1, int(self.cfg_.max_iter / 100)) * 10
+
         return
  
  

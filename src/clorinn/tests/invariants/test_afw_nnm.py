@@ -16,9 +16,9 @@ Running
 # License: BSD 3 clause
 
 import unittest
+import logging
 
 from clorinn.optimize import AwayStepFrankWolfe
-from clorinn.utils.logs import CustomLogger
 from clorinn.tests.invariants.invariant_base import AFWInvariantBase
 from clorinn.tests.invariants.invariant_utils import FW_CONFIG, R_NUC, _build_problem
 
@@ -32,7 +32,7 @@ class TestAFWNNMFull(AFWInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up AFW / NNM / full invariant tests")
         prob = _build_problem()
         m = AwayStepFrankWolfe(model='nnm', **FW_CONFIG)
@@ -50,7 +50,7 @@ class TestAFWNNMMask(AFWInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up AFW / NNM / mask invariant tests")
         prob = _build_problem()
         m = AwayStepFrankWolfe(model='nnm', **FW_CONFIG)

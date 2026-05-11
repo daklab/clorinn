@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
+import logging
 
 from clorinn.optimize import FrankWolfe
-from clorinn.utils.logs import CustomLogger
 
 class TestDegenerateInputs(unittest.TestCase):
     """
@@ -17,7 +17,7 @@ class TestDegenerateInputs(unittest.TestCase):
     """
 
     def setUp(self):
-        self.logger_ = CustomLogger(__name__)
+        self.logger_ = logging.getLogger(__name__)
 
     def _make_solver(self):
         return FrankWolfe(

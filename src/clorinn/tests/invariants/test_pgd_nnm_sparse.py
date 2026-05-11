@@ -16,9 +16,9 @@ Running
 # License: BSD 3 clause
 
 import unittest
+import logging
 
 from clorinn.optimize import ProjectedGradientDescent
-from clorinn.utils.logs import CustomLogger
 from clorinn.tests.invariants.invariant_base import PGDSparseInvariantBase
 from clorinn.tests.invariants.invariant_utils import PGD_CONFIG, R_NUC, L1_MULT, _build_problem
 
@@ -32,7 +32,7 @@ class TestPGDNNMSparseFull(PGDSparseInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up PGD / NNM-Sparse / full invariant tests")
         prob = _build_problem()
         pgd = ProjectedGradientDescent(model='nnm-sparse', **PGD_CONFIG)
@@ -51,7 +51,7 @@ class TestPGDNNMSparseMask(PGDSparseInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up PGD / NNM-Sparse / mask invariant tests")
         prob = _build_problem()
         pgd = ProjectedGradientDescent(model='nnm-sparse', **PGD_CONFIG)

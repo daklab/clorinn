@@ -16,9 +16,9 @@ Running
 # License: BSD 3 clause
 
 import unittest
+import logging
 
 from clorinn.optimize import FrankWolfe
-from clorinn.utils.logs import CustomLogger
 from clorinn.tests.invariants.invariant_base import FWSparseInvariantBase
 from clorinn.tests.invariants.invariant_utils import FW_CONFIG, R_NUC, L1_MULT, _build_problem
 
@@ -32,7 +32,7 @@ class TestFWNNMSparseFull(FWSparseInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up FW / NNM-Sparse / full invariant tests")
         prob = _build_problem()
         m = FrankWolfe(model='nnm-sparse', **FW_CONFIG)
@@ -51,7 +51,7 @@ class TestFWNNMSparseMask(FWSparseInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up FW / NNM-Sparse / mask invariant tests")
         prob = _build_problem()
         m = FrankWolfe(model='nnm-sparse', **FW_CONFIG)

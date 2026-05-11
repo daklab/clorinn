@@ -13,16 +13,12 @@ that the installed package is importable and the entry point is wired
 correctly.
 
 """
-import os
 import sys 
 import argparse
-import unittest
-import logging
 
-from .utils.logs import CustomLogger
+from .utils.logs import configure_logging
 from .utils import project
 
-mlogger = CustomLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(description=project.description())
@@ -68,21 +64,18 @@ def show_help(parser, opts):
 
 def main():
     parser, opts = parse_args()
-    log_level = logging.INFO  if opts.verbose  else None
-    log_level = logging.DEBUG if opts.vverbose else log_level
-    mlogger.set_loglevel(log_level)
-    mlogger.override_global_default_loglevel(log_level)
+
+    verbosity = 2 if opts.vverbose else 1 if opts.verbose else 0
+    mlogger  = configure_logging(verbose=verbosity, formatter="short", force=True)
 
     if opts.test or opts.testmodules:
-        from .tests.run import run_unittests
         mlogger.debug("Calling logger from main")
-        if opts.vverbose:
-            verbosity = 2
-        elif opts.verbose:
-            verbosity = 1
-        else:
-            verbosity = 0
-        run_unittests(test_class_names = opts.testmodules, verbosity = verbosity)
+        # update package logger to verbose=0, 
+        # handle test logger from unittests
+        mlogger = configure_logging(verbose = 0, formatter = "short", force = True)
+        mlogger.debug("Package is now quiet. If you are seeing this message, there is a logger error.")
+        from .tests.run import run_unittests
+        run_unittests(test_class_names=opts.testmodules, verbosity=verbosity)
 
     elif opts.version:
         show_version()

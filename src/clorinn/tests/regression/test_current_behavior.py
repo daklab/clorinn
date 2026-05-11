@@ -39,11 +39,11 @@ Running
 """
 import os
 import unittest
+import logging
 import numpy as np
 
 from clorinn.utils import SamplingCovariance
 from clorinn.optimize import FrankWolfe, ProjectedGradientDescent
-from clorinn.utils.logs import CustomLogger
 from clorinn.tests.regression.regression_config import FW_CONFIG, PGD_CONFIG, R_NUC, L1_MULT, PORTABLE_TOLERANCE_RULES
 from clorinn.tests.regression.regression_helper import assert_allclose_print_worst_entry
 
@@ -91,7 +91,7 @@ class _FWRegressionBase(unittest.TestCase):
         if not cls.fixture_name:
             raise unittest.SkipTest("base class")
 
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info(f"[{cls.model}] loading {cls.fixture_name}")
         f = _load(cls.fixture_name)
         cls.f = f
@@ -241,7 +241,7 @@ class _PGDRegressionBase(unittest.TestCase):
         if not cls.fixture_name:
             raise unittest.SkipTest("base class")
 
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info(f"[pgd/{cls.model}] loading {cls.fixture_name}")
 
         f = _load(cls.fixture_name)

@@ -37,7 +37,7 @@ import warnings
 import logging
 import numpy as np
 
-from .logs import get_loglevel, CustomLogger
+from .logs import get_logger
 
 
 class SamplingCovariance:
@@ -110,16 +110,10 @@ class SamplingCovariance:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_matrix(
-        cls,
-        A,
-        repair          = True,
-        reg             = None,
-        eig_tol         = 0.0,
-        conv_tol        = 1e-7,
-        max_iter        = 100,
-        verbose         = 1
-    ):
+    def from_matrix(cls, A,
+        repair = True, reg = None, verbose = None,
+        eig_tol = 0.0, conv_tol = 1e-7, max_iter = 100):
+
         """
         Construct a SamplingCovariance from a pre-assembled matrix.
 
@@ -149,14 +143,16 @@ class SamplingCovariance:
         max_iter : int, default=100
             Maximum number of Higham iterations.
 
-        verbose : int, default=1
-            Controls the verbosity.  Three levels are recognised:
-                0  Silent.  Only warnings and errors are reported.
-                   Equivalent to logging.WARN.
-                1  Progress.  Equivalent to logging.INFO.
-                   Logs iteration count, step size, and duality gap at convergence.
-                2  Debug.  Equivalent to logging.DEBUG.
-                   Logs all debugging outputs.
+        verbose : int or None, default=None
+            Controls the verbosity of solver output.  Three levels (or None) are
+            recognised:
+                None  Inherit loglevel, do not change anything.
+                0     Silent.  Only warnings and errors are reported.
+                      Equivalent to logging.WARN.
+                1     Progress.  Equivalent to logging.INFO.
+                      Logs iteration count, step size, and duality gap at convergence.
+                2     Debug.  Equivalent to logging.DEBUG.
+                      Logs all debugging outputs.
             Higher values are treated as 2.
 
         Returns
@@ -169,9 +165,7 @@ class SamplingCovariance:
             If A is not square, contains NaN/Inf, or is non-PD and
             repair=False.
         """
-        loglevel = get_loglevel(verbose)
-        logger = CustomLogger(__name__, level=loglevel)
-        logger.override_subsystem_loglevel(loglevel)
+        logger = get_logger(__name__, verbose=verbose, scope="solver")
 
         A = np.asarray(A, dtype=float)
         cls._validate_shape(A)

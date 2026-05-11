@@ -17,9 +17,9 @@ Running
 # License: BSD 3 clause
 
 import unittest
+import logging
 
 from clorinn.optimize import FrankWolfe
-from clorinn.utils.logs import CustomLogger
 from clorinn.tests.invariants.invariant_base import FWInvariantBase
 from clorinn.tests.invariants.invariant_utils import FW_CONFIG, R_NUC, _build_problem
 
@@ -33,7 +33,7 @@ class TestFWNNMCorrFull(FWInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up FW / NNM-Corr / full invariant tests")
         prob = _build_problem()
         m = FrankWolfe(model='nnm-corr', **FW_CONFIG)
@@ -51,7 +51,7 @@ class TestFWNNMCorrMask(FWInvariantBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up FW / NNM-Corr / mask invariant tests")
         prob = _build_problem()
         m = FrankWolfe(model='nnm-corr', **FW_CONFIG)

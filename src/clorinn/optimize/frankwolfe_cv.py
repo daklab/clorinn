@@ -2,7 +2,7 @@
 
 import numpy as np
 from .frankwolfe import FrankWolfe
-from ..utils.logs import CustomLogger
+from ..utils.logs import get_logger
 from ..utils import model_errors as merr
 
 class FrankWolfe_CV():
@@ -77,7 +77,7 @@ class FrankWolfe_CV():
 
     def __init__(self, kfolds = 2, test_size = None, shuffle = True,
             chain_init = True, reverse_path = False,
-            return_fits = True, debug = False,
+            return_fits = True, verbose=None,
             **kwargs):
         
         self.kfolds_ = kfolds
@@ -92,8 +92,7 @@ class FrankWolfe_CV():
         kwargs.setdefault('debug', debug)
         self.kwargs_ = kwargs
 
-        self.is_debug_ = debug
-        self.logger_   = CustomLogger(__name__, is_debug = self.is_debug_)
+        self.logger_ = get_logger(__name__, verbose=verbose, scope="package")
         return
 
 

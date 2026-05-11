@@ -9,7 +9,7 @@ from .svd import nuclear_norm_oracle
 from .result import History, FitResult
 from .config import SolverConfig
 from .state import IterState, StopReason, StepInfo
-from ..utils.logs import get_loglevel, CustomLogger
+from ..utils.logs import get_logger
 from ..utils.sampling_covariance import SamplingCovariance
 
 
@@ -67,15 +67,16 @@ class FrankWolfe():
         Threshold for the change in objective function in successive iterations,
         see 'stop_criteria'.
 
-    verbose : int, default=1
-        Controls the verbosity of solver output.  Three levels are
+    verbose : int or None, default=None
+        Controls the verbosity of solver output.  Three levels (or None) are
         recognised:
-            0  Silent.  Only warnings and errors are reported. 
-               Equivalent to logging.WARN.
-            1  Progress.  Equivalent to logging.INFO. 
-               Logs iteration count, step size, and duality gap at convergence.
-            2  Debug.  Equivalent to logging.DEBUG.
-               Logs all debugging outputs.
+            None  Inherit loglevel, do not change anything.
+            0     Silent.  Only warnings and errors are reported. 
+                  Equivalent to logging.WARN.
+            1     Progress.  Equivalent to logging.INFO. 
+                  Logs iteration count, step size, and duality gap at convergence.
+            2     Debug.  Equivalent to logging.DEBUG.
+                  Logs all debugging outputs.
         Higher values are treated as 2.
 
     print_skip : integer, default=None
@@ -88,7 +89,11 @@ class FrankWolfe():
             stop_criteria = ['duality_gap', 'step_size', 'relative_loss', 'relative_dg'],
             model = 'nnm', simplex_method = 'sort',
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
-            verbose = 1, print_skip = None):
+            verbose = None, print_skip = None):
+
+        # Logger
+        self.logger_ = get_logger(__name__, verbose=verbose, scope="solver")
+        self.verbose_ = verbose
 
         self.model_ = model
 
@@ -104,16 +109,12 @@ class FrankWolfe():
         )
                 
         self.prog_step_skip_ = print_skip
-        if verbose > 0 and self.prog_step_skip_ is None:
-            if verbose == 1:
-                self.prog_step_skip_ = max(1, int(self.cfg_.max_iter / 100)) * 10
-            elif verbose > 1:
-                self.prog_step_skip_ = 1
 
-        # Logger
-        loglevel = get_loglevel(verbose)
-        self.logger_ = CustomLogger(__name__, level = loglevel)
-        self.logger_.override_subsystem_loglevel(loglevel)
+        if self.prog_step_skip_ is None and self.logger_.isEnabledFor(logging.INFO):
+            if self.logger_.isEnabledFor(logging.DEBUG):
+                self.prog_step_skip_ = 1
+            else:
+                self.prog_step_skip_ = max(1, int(self.cfg_.max_iter / 100)) * 10
 
         return
 

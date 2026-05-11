@@ -1,5 +1,5 @@
 
-from clorinn.utils.unittest_tester import UnittestTester
+from clorinn.tests.unittest_tester import UnittestTester
 from clorinn import tests as mtests
 
 import inspect

@@ -1,8 +1,7 @@
-
 import unittest
 import logging
-from . import project
-from .logs import CustomLogger
+from clorinn.utils import project
+from clorinn.utils.logs import get_logger
 
 class UnittestTester:
     """
@@ -20,6 +19,7 @@ class UnittestTester:
         self.test_class = test_class
         self.loader = unittest.TestLoader()
         self.verbosity = verbosity
+        self.logger_ = get_logger(__name__, verbose=verbosity, scope="subsystem")
 
         if not isinstance(test_class, list):
             self.test_class = [test_class]
@@ -45,19 +45,9 @@ class UnittestTester:
         self.runner.run(self._test_suites())
 
 
-# class UnittestResult(unittest.TextTestResult):
-#     def addSuccess(self, test):
-#         super(unittest.TextTestResult, self).addSuccess(test)
-#         if self.showAll:
-#             self.stream.writeln("ok")
-#         elif self.dots:
-#             # All this for removing a dot from output :)
-#             #self.stream.write('.')
-#             self.stream.flush()
-
 class UnittestResult(unittest.TextTestResult):
     """
-    Override classes in the unittest to print outputs with CustomLogger.
+    Override classes in the unittest to print outputs.
 
     TextTestRunner verbosity translates to TextTestResult:
         verbosity = 2 --> showAll = True
@@ -67,8 +57,7 @@ class UnittestResult(unittest.TextTestResult):
 
     def __init__(self, stream, descriptions, verbosity):
         super().__init__(stream, descriptions, verbosity)
-        level = logging.getLogger(project.get_name()).getEffectiveLevel()
-        self.logger_ = CustomLogger(__name__, level=level)
+        self.logger_ = logging.getLogger(__name__)
 
     def getDescription(self, test):
         """

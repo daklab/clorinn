@@ -38,7 +38,6 @@ import unittest
 import numpy as np
 
 from clorinn.optimize.objectives import NNMCorrObjective
-from clorinn.utils.logs import CustomLogger
 from clorinn.utils import SamplingCovariance
 
 
@@ -166,7 +165,7 @@ class TestNNMCorrExactMissingness(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.logger_ = CustomLogger(__name__)
+        cls.logger_ = logging.getLogger(__name__)
         cls.logger_.info("Setting up NNM-Corr exact missingness tests")
         prob        = _make_problem()
         cls.prob    = prob
