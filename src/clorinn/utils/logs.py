@@ -2,58 +2,61 @@ import copy
 import logging
 import sys
 
-
-PACKAGE_LOGGER = "clorinn"
-SOLVER_SUBSYSTEMS = ("clorinn.optimize", "clorinn.utils")
+PACKAGE_LOGGER = __name__.split(".", 1)[0]
 DEFAULT_LOGGER_FORMAT = "%(asctime)s | %(name)-24s | %(levelname)-7s | %(message)s"
 
-
-def verbose_to_level(verbose):
-    if verbose is None: return None
-    if verbose >= 2:    return logging.DEBUG
-    if verbose == 1:    return logging.INFO
+def verbosity_to_level(verbosity):
+    if verbosity is None: return None
+    if verbosity >= 2:    return logging.DEBUG
+    if verbosity == 1:    return logging.INFO
     return logging.WARNING
 
 
-def subsystem_name(logger_name):
-    parts = logger_name.split(".")
+def subsystem_of(name):
+    parts = name.split(".")
     if len(parts) >= 2 and parts[0] == PACKAGE_LOGGER:
         return f"{parts[0]}.{parts[1]}"
-    return logger_name
+    return name
 
 
-def get_logger(name, *, verbose=None, level=None, scope="package"):
+def set_loglevel(name, *, verbosity=None, level=None, scope="package"):
     """
     Set the logging level for a Clorinn logger.
 
     scope:
         "module"    -> clorinn.optimize.frankwolfe
-        "solver"    -> SOLVER_SUBSYSTEMS
         "subsystem" -> clorinn.optimize
         "package"   -> clorinn
     """
     if level is None:
-        level = verbose_to_level(verbose)
+        level = verbosity_to_level(verbosity)
 
     if level is None:
         return logging.getLogger(name)
 
-    if scope == "package":
-        target_names = (PACKAGE_LOGGER)
-    elif scope == "solver":
-        target_names = SOLVER_SUBSYSTEMS
-    elif scope == "subsystem":
-        target_names = (subsystem_name(name))
-    elif scope == "module":
-        target_names = (name)
-    else:
+    scope_map = {
+        "package":   PACKAGE_LOGGER,
+        "subsystem": subsystem_of(name),
+        "module":    name,
+    }
+    try:
+        target = scope_map[scope]
+    except KeyError:
         raise ValueError(f"Unknown logging scope: {scope!r}")
 
-    for s in target_names:
-        logger = logging.getLogger(s)
-        logger.setLevel(level)
+    logging.getLogger(target).setLevel(level)
 
-    return logging.getLogger(name)
+    return
+
+
+def get_log_formatter(formatter="short", fmt=DEFAULT_LOGGER_FORMAT):
+    fmt_classes = {
+        "short" :     ShortNameFormatter,
+        "subsystem" : SubsystemNameFormatter,
+        "testclass" : TestClassNameFormatter,
+    }
+    fmt_class = fmt_classes.get(formatter, logging.Formatter)
+    return fmt_class(fmt)
 
 
 class ShortNameFormatter(logging.Formatter):
@@ -79,25 +82,57 @@ class SubsystemNameFormatter(logging.Formatter):
         return super().format(r)
 
 
-def configure_logging(
-    *,
-    verbose=None,
-    level=None,
-    stream=None,
-    filename=None,
-    subsystem_levels=None,
-    fmt=DEFAULT_LOGGER_FORMAT,
-    formatter="short",
-    force=False,
-    propagate=True,
-):
+class TestClassNameFormatter(logging.Formatter):
+    """
+    Replace name with TestClass:
+        e.g. 'clorinn.tests.unittest_tester' -> 'TestAFWNNMCorrFull'.
+    """
+    def format(self, record):
+        r = copy.copy(record)
+        if hasattr(r, "test_name"):
+            r.name = r.test_name
+        else:
+            r.name = r.name.split(".")[-1]
+        return super().format(r)
+
+
+def apply_verbosity(name, verbosity=None):
+    if verbosity is None:
+        return
+    configure_logging() # idempotent install
+    level = verbosity_to_level(verbosity)
+    logging.getLogger(name).setLevel(level)
+    return
+
+
+def configure_module_logger(name, verbosity=None):
+    subsystem = subsystem_of(name)
+    apply_verbosity(subsystem, verbosity=verbosity)
+    return logging.getLogger(name)
+
+
+def configure_logging(*, 
+    verbosity=None, level=None,
+    stream=None, filename=None,
+    subsystem_levels=None, subsystem_verbosity=None,
+    fmt=DEFAULT_LOGGER_FORMAT, formatter="short",
+    force=False, propagate=True):
     """
     Optional caller-facing logging setup.
-
-    This is the only place, apart from the CLI, where Clorinn should create
-    handlers.
     """
     package_logger = logging.getLogger(PACKAGE_LOGGER)
+    already_ours   = any(getattr(h, "_clorinn", False) for h in package_logger.handlers)
+
+    # verbosity = None, level = None keeps level at None
+    if level is None:
+        level = verbosity_to_level(verbosity)
+
+    if already_ours and not force:
+        # we already created a package_logger 
+        # update level, don't add another handler
+        if level is not None:
+            package_logger.setLevel(level)
+        return package_logger
 
     if force:
         for handler in list(package_logger.handlers):
@@ -105,32 +140,30 @@ def configure_logging(
                 continue
             package_logger.removeHandler(handler)
 
-    if level is None:
-        level = verbose_to_level(verbose)
-    if level is None:
-        level = logging.WARNING
-
     if filename is not None:
         handler = logging.FileHandler(filename)
     else:
         handler = logging.StreamHandler(stream if stream is not None else sys.stderr)
+    handler._clorinn = True
 
-    if formatter == "short":
-        log_formatter = ShortNameFormatter(fmt)
-    elif formatter == "subsystem":
-        log_formatter = SubsystemNameFormatter(fmt)
-    else:
-        log_formatter = logging.Formatter(fmt)
+    log_formatter = get_log_formatter(formatter=formatter, fmt=fmt)
 
     handler.setLevel(logging.NOTSET)
     handler.setFormatter(log_formatter)
     package_logger.addHandler(handler)
+
+    if level is None: level = logging.WARNING
     package_logger.setLevel(level)
     package_logger.propagate = propagate
 
     if subsystem_levels:
         for subsystem, value in subsystem_levels.items():
-            name = subsystem if subsystem.startswith(PACKAGE_LOGGER) else f"{PACKAGE_LOGGER}.{subsystem}"
-            logging.getLogger(name).setLevel(value)
+            target = subsystem if subsystem.startswith(PACKAGE_LOGGER) else f"{PACKAGE_LOGGER}.{subsystem}"
+            logging.getLogger(target).setLevel(value)
 
-    return package_logger
+    if subsystem_verbosity:
+        for subsystem, value in subsystem_verbosity.items():
+            target = subsystem if subsystem.startswith(PACKAGE_LOGGER) else f"{PACKAGE_LOGGER}.{subsystem}"
+            logging.getLogger(target).setLevel(verbosity_to_level(value))
+
+    return

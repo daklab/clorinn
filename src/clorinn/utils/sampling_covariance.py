@@ -37,8 +37,7 @@ import warnings
 import logging
 import numpy as np
 
-from .logs import get_logger
-
+from .logs import configure_module_logger
 
 class SamplingCovariance:
     """
@@ -144,6 +143,7 @@ class SamplingCovariance:
             Maximum number of Higham iterations.
 
         verbose : int or None, default=None
+            
             Controls the verbosity of solver output.  Three levels (or None) are
             recognised:
                 None  Inherit loglevel, do not change anything.
@@ -165,7 +165,7 @@ class SamplingCovariance:
             If A is not square, contains NaN/Inf, or is non-PD and
             repair=False.
         """
-        logger = get_logger(__name__, verbose=verbose, scope="solver")
+        logger = configure_module_logger(__name__, verbosity=verbose)
 
         A = np.asarray(A, dtype=float)
         cls._validate_shape(A)

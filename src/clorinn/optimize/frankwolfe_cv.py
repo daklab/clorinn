@@ -2,7 +2,7 @@
 
 import numpy as np
 from .frankwolfe import FrankWolfe
-from ..utils.logs import get_logger
+from ..utils.logs import configure_module_logger
 from ..utils import model_errors as merr
 
 class FrankWolfe_CV():
@@ -88,11 +88,10 @@ class FrankWolfe_CV():
         self.do_reverse_path_ = reverse_path
         
         # Handle FrankWolfe options
-        kwargs.setdefault('suppress_warnings', True)
-        kwargs.setdefault('debug', debug)
+        kwargs.setdefault('verbose', verbose)
         self.kwargs_ = kwargs
 
-        self.logger_ = get_logger(__name__, verbose=verbose, scope="package")
+        self.logger_ = configure_module_logger(__name__, verbosity=verbose)
         return
 
 

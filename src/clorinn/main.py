@@ -15,6 +15,7 @@ correctly.
 """
 import sys 
 import argparse
+import logging
 
 from .utils.logs import configure_logging
 from .utils import project
@@ -64,17 +65,23 @@ def show_help(parser, opts):
 
 def main():
     parser, opts = parse_args()
-
     verbosity = 2 if opts.vverbose else 1 if opts.verbose else 0
-    mlogger  = configure_logging(verbose=verbosity, formatter="short", force=True)
+    configure_logging(verbosity=verbosity, force=True)
+    mlogger = logging.getLogger(__name__)
+    mlogger.debug("Calling logger from main")
 
     if opts.test or opts.testmodules:
-        mlogger.debug("Calling logger from main")
-        # update package logger to verbose=0, 
-        # handle test logger from unittests
-        mlogger = configure_logging(verbose = 0, formatter = "short", force = True)
-        mlogger.debug("Package is now quiet. If you are seeing this message, there is a logger error.")
         from .tests.run import run_unittests
+        # update package logger
+        configure_logging(
+            verbosity=0,
+            formatter="testclass",
+            subsystem_verbosity={
+                "tests": verbosity,
+            },
+            fmt="%(name)-40s | %(levelname)-7s | %(message)s",
+            force=True,
+        )
         run_unittests(test_class_names=opts.testmodules, verbosity=verbosity)
 
     elif opts.version:

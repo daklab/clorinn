@@ -8,7 +8,7 @@ from .objectives import make_objective
 from .projections import NuclearNormProjection
 from .result import History, FitResult
 from .state import StopReason
-from ..utils.logs import get_logger
+from ..utils.logs import configure_module_logger
 from ..utils.sampling_covariance import SamplingCovariance 
 
 class ProjectedGradientDescent():
@@ -65,15 +65,16 @@ class ProjectedGradientDescent():
         if `verbose = 1`.
 
     verbose : int or None, default=None
-        Controls the verbosity of solver output.  Three levels (or None) are
-        recognised:
+        Controls the verbosity of solver output. If None, logging is handled by
+        caller. If not None, override logging handlers of caller / installs new
+        log handler only if no clorinn handler exists.
+        Three levels are recognised:
             0     Silent.  Only warnings and errors are reported.
                   Equivalent to logging.WARN.
             1     Progress.  Equivalent to logging.INFO.
                   Logs iteration count, step size, and duality gap at convergence.
             2     Debug.  Equivalent to logging.DEBUG.
                   Logs all debugging outputs.
-            None  Inherit loglevel, do not change anything.
         Higher values are treated as 2.
     """
  
@@ -85,15 +86,13 @@ class ProjectedGradientDescent():
                  print_skip = None,
                  verbose = None):
 
-        self.logger_ = get_logger(__name__, verbose=verbose, scope="solver")
+        self.logger_ = configure_module_logger(__name__, verbosity=verbose)
 
         self.model_          = model
         self.max_iter_       = max_iter
         self.rel_tol_        = rel_tol
         self.simplex_method_ = simplex_method
         self.stop_criteria_  = tuple(stop_criteria)
-        self.prog_step_skip_ = print_skip
-
         self.prog_step_skip_ = print_skip
 
         if self.prog_step_skip_ is None and self.logger_.isEnabledFor(logging.INFO):

@@ -1,7 +1,7 @@
 import unittest
 import logging
 from clorinn.utils import project
-from clorinn.utils.logs import get_logger
+from clorinn.utils.logs import configure_module_logger
 
 class UnittestTester:
     """
@@ -19,7 +19,7 @@ class UnittestTester:
         self.test_class = test_class
         self.loader = unittest.TestLoader()
         self.verbosity = verbosity
-        self.logger_ = get_logger(__name__, verbose=verbosity, scope="subsystem")
+        self.logger_ = configure_module_logger(__name__, verbosity=verbosity)
 
         if not isinstance(test_class, list):
             self.test_class = [test_class]
@@ -67,43 +67,49 @@ class UnittestResult(unittest.TextTestResult):
         I am overriding the description to suit the need of this package.
 
         test.id() --> full.qualified.path 
-                        e.g. clorinn.tests.test_current_behavior.TestRegressionNNM.test_M_identical
+                        e.g. clorinn.tests.regression.test_current_behavior.TestRegressionFWNNM.test_M_identical
         str(test) --> test_method_name (full.qualified.path)
-                        e.g. test_M_identical (clorinn.tests.test_current_behavior.TestRegressionNNM.test_M_identical)
+                        e.g. test_M_identical (clorinn.tests.regression.test_current_behavior.TestRegressionFWNNM.test_M_identical)
         """
         parts = test.id().split('.')
-        test_id_str = '.'.join(parts[2:])
+        #test_id_str = '.'.join(parts[2:])
+        test_id_str = parts[-1]
         return test_id_str
+
+    def test_name(self, test):
+        parts = test.id().split('.')
+        return {"test_name": parts[-2]}
+        
 
     def startTest(self, test):
         unittest.TestResult.startTest(self, test)  # skip TextTestResult's stream write
         if self.showAll:
-            self.logger_.info(f"{self.getDescription(test)} ... start")
+            self.logger_.info(f"{self.getDescription(test)} ... start", extra=self.test_name(test))
 
     def addSuccess(self, test):
         super(unittest.TextTestResult, self).addSuccess(test)
         if self.showAll:
-            self.logger_.info(f"{self.getDescription(test)} ... PASS")
+            self.logger_.info(f"{self.getDescription(test)} ... PASS", extra=self.test_name(test))
         elif self.dots:
-            self.logger_.info(f"PASS")
+            self.logger_.info(f"PASS", extra=self.test_name(test))
 
     def addSkip(self, test, reason):
         super(unittest.TextTestResult, self).addSkip(test, reason)
         if self.showAll:
-            self.logger_.info(f"{self.getDescription(test)} ... skipped '{reason}'")
+            self.logger_.info(f"{self.getDescription(test)} ... skipped '{reason}'", extra=self.test_name(test))
         elif self.dots:
-            self.logger_.info(f"skipped '{reason}'")
+            self.logger_.info(f"skipped '{reason}'", extra=self.test_name(test))
 
     def addFailure(self, test, err):
         super(unittest.TextTestResult, self).addFailure(test, err)
-        self.logger_.error(f"{self.getDescription(test)} ... FAIL")
+        self.logger_.error(f"{self.getDescription(test)} ... FAIL", extra=self.test_name(test))
 
     def addError(self, test, err):
         super(unittest.TextTestResult, self).addError(test, err)
-        self.logger_.error(f"{self.getDescription(test)} ... ERROR")
+        self.logger_.error(f"{self.getDescription(test)} ... ERROR", extra=self.test_name(test))
 
 
-class MTestProgram(unittest.TestProgram):
+class MainTestProgram(unittest.TestProgram):
     """
     Inject overriden class to the main test program.
     Usage:
@@ -116,4 +122,4 @@ class MTestProgram(unittest.TestProgram):
         self.testRunner = unittest.TextTestRunner(resultclass = UnittestResult)
         super(MainTestProgram, self).runTests()
 
-main = MTestProgram
+main = MainTestProgram

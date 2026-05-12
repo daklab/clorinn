@@ -9,7 +9,7 @@ from .svd import nuclear_norm_oracle
 from .result import History, FitResult
 from .config import SolverConfig
 from .state import IterState, StopReason, StepInfo
-from ..utils.logs import get_logger
+from ..utils.logs import configure_module_logger
 from ..utils.sampling_covariance import SamplingCovariance
 
 
@@ -67,10 +67,11 @@ class FrankWolfe():
         Threshold for the change in objective function in successive iterations,
         see 'stop_criteria'.
 
-    verbose : int or None, default=None
-        Controls the verbosity of solver output.  Three levels (or None) are
-        recognised:
-            None  Inherit loglevel, do not change anything.
+    verbosity : int or None, default=None
+        Controls the verbosity of solver output. If None, logging is handled by
+        caller. If not None, override logging handlers of caller / installs new 
+        log handler only if no clorinn handler exists. 
+        Three levels are recognised:
             0     Silent.  Only warnings and errors are reported. 
                   Equivalent to logging.WARN.
             1     Progress.  Equivalent to logging.INFO. 
@@ -91,9 +92,8 @@ class FrankWolfe():
             tol = 1e-3, step_tol = 1e-3, rel_tol = 1e-8,
             verbose = None, print_skip = None):
 
-        # Logger
-        self.logger_ = get_logger(__name__, verbose=verbose, scope="solver")
-        self.verbose_ = verbose
+        # Logger 
+        self.logger_ = configure_module_logger(__name__, verbosity=verbose)
 
         self.model_ = model
 
