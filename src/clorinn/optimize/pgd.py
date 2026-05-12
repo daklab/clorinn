@@ -99,7 +99,7 @@ class ProjectedGradientDescent():
             if self.logger_.isEnabledFor(logging.DEBUG):
                 self.prog_step_skip_ = 1
             else:
-                self.prog_step_skip_ = max(1, int(self.cfg_.max_iter / 100)) * 10
+                self.prog_step_skip_ = max(1, int(self.max_iter_ / 100)) * 10
 
         return
  

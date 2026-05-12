@@ -4,6 +4,7 @@ import sys
 
 PACKAGE_LOGGER = __name__.split(".", 1)[0]
 DEFAULT_LOGGER_FORMAT = "%(asctime)s | %(name)-24s | %(levelname)-7s | %(message)s"
+DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 def verbosity_to_level(verbosity):
     if verbosity is None: return None
@@ -49,14 +50,14 @@ def set_loglevel(name, *, verbosity=None, level=None, scope="package"):
     return
 
 
-def get_log_formatter(formatter="short", fmt=DEFAULT_LOGGER_FORMAT):
+def get_log_formatter(formatter="short"):
     fmt_classes = {
         "short" :     ShortNameFormatter,
         "subsystem" : SubsystemNameFormatter,
         "testclass" : TestClassNameFormatter,
     }
     fmt_class = fmt_classes.get(formatter, logging.Formatter)
-    return fmt_class(fmt)
+    return fmt_class
 
 
 class ShortNameFormatter(logging.Formatter):
@@ -115,7 +116,7 @@ def configure_logging(*,
     verbosity=None, level=None,
     stream=None, filename=None,
     subsystem_levels=None, subsystem_verbosity=None,
-    fmt=DEFAULT_LOGGER_FORMAT, formatter="short",
+    fmt=DEFAULT_LOGGER_FORMAT, datefmt=DEFAULT_DATE_FORMAT, formatter="short",
     force=False, propagate=True):
     """
     Optional caller-facing logging setup.
@@ -146,10 +147,10 @@ def configure_logging(*,
         handler = logging.StreamHandler(stream if stream is not None else sys.stderr)
     handler._clorinn = True
 
-    log_formatter = get_log_formatter(formatter=formatter, fmt=fmt)
+    log_formatter = get_log_formatter(formatter=formatter)
 
     handler.setLevel(logging.NOTSET)
-    handler.setFormatter(log_formatter)
+    handler.setFormatter(log_formatter(fmt=fmt, datefmt=datefmt))
     package_logger.addHandler(handler)
 
     if level is None: level = logging.WARNING
