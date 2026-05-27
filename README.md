@@ -37,6 +37,5 @@ pip install -e .
 
 ## Related algorithms
 
-Also see Sparse PCA, RobustPCA, Weighted PCA, Bayesian PCA.
+Sparse PCA, RobustPCA, Weighted PCA, Bayesian PCA.
 
-**PCA is not convex and cannot be made so.**

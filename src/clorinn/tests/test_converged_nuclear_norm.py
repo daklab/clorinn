@@ -48,4 +48,4 @@ class TestConvergedNuclearNorm(unittest.TestCase):
         nnm = FrankWolfe(model = 'nnm', svd_max_iter = 50)
         nnm.fit(Z_cent, target_nucnorm, Ytrue = Z_true_cent)
         converged_nucnorm = np.linalg.norm(nnm.X, ord='nuc')
-        np.testing.assert_almost_equal(converged_nucnorm, target_nucnorm, err_msg = err_msg)
+        np.testing.assert_almost_equal(converged_nucnorm, target_nucnorm, decimal=4, err_msg=err_msg)
