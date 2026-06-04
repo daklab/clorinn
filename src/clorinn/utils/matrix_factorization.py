@@ -15,12 +15,6 @@ where F := V is an orthonormal matrix of hidden factors (P x K)
 and L := U diag(S) is the matrix of trait loadings (N x K).
 F being orthonormal ensures that the squared cosine scores and
 contribution scores have valid geometric interpretations.
-
-References
-----------
-    Banerjee, S. et al. Convex approaches to isolate the shared and
-    distinct genetic components of complex traits. (2025).
-    Section 2.5: Characterization of hidden factors.
 """
 # Author: Saikat Banerjee
 
@@ -30,14 +24,6 @@ import numpy as np
 class MatrixFactorization():
 
     """
-    Factor extraction from low-rank matrices estimated by Clorinn.
-
-    Given X = U D V^T (thin SVD), the class computes:
-        - Factors:  F = V       (P x K, orthonormal)
-        - Loadings: L = U D     (N x K)
-    such that X ≈ L F^T, and provides squared cosine scores
-    and contribution scores for downstream interpretation.
-
     Parameters
     ----------
     method : string, default='svd'
@@ -53,12 +39,9 @@ class MatrixFactorization():
         Singular values below `sv_threshold * s_1` are discarded
         when `k` is None, where `s_1` is the largest singular value.
 
-    Notes
     -----
     The orthonormality of F is required for valid interpretation
-    of the squared cosine scores (Eq. 18) and contribution scores
-    (Eq. 19) as defined in the Clorinn manuscript.
-
+    of the squared cosine scores and contribution scores.
     The loadings L carry all of the scale from the singular values.
     The loadings can be interpreted as the projection of X on the
     factors, i.e., L = X F.
@@ -69,8 +52,10 @@ class MatrixFactorization():
         mf.fit(X)
         L = mf.L
         F = mf.F
-        cos2 = mf.cos2_score
-        contr = mf.contribution_score
+        cos2_traits = mf.cos2_traits
+        contr_traits = mf.contribution_traits
+        cos2_variants = mf.cos2_variants
+        contr_variants = mf.contribution_variants
     """
 
     def __init__(self, method = 'svd', k = None, sv_threshold = 1e-6):
@@ -93,9 +78,9 @@ class MatrixFactorization():
 
 
     @property
-    def Vh(self):
-        """Right singular vectors (transposed), shape (k, P)."""
-        return self.Vh_
+    def V(self):
+        """Right singular vectors, shape (P, k)."""
+        return self.V_
 
 
     @property
@@ -111,46 +96,26 @@ class MatrixFactorization():
 
 
     @property
-    def cos2_score(self):
-        """
-        Squared cosine scores, shape (N, k).
-
-        cos2[j, i] measures the importance of factor i for trait j,
-        defined as the fraction of trait j's total squared loading
-        attributable to factor i:
-
-            cos2[j, i] = L[j,i]^2 / sum_i L[j,i]^2
-
-        Rows sum to 1 (up to numerical precision).
-        """
-        return self.cos2_score_
+    def cos2_traits(self):
+        return self.cos2_traits_
 
 
     @property
-    def contribution_score(self):
-        """
-        Contribution scores, shape (N, k).
+    def cos2_variants(self):
+        return self.cos2_variants_
 
-        contr[j, i] measures the importance of trait j for factor i,
-        defined as trait j's share of the total loading on factor i:
 
-            contr[j, i] = L[j,i]^2 / sum_j L[j,i]^2
+    @property
+    def contribution_traits(self):
+        return self.contr_traits_
 
-        Columns sum to 1 (up to numerical precision).
-        """
-        return self.contribution_score_
+
+    @property
+    def contribution_variants(self):
+        return self.contr_variants_
 
 
     def fit(self, X):
-        """
-        Extract factors and loadings from the low-rank matrix X.
-
-        Parameters
-        ----------
-        X : np.ndarray [size (N, P); dtype: float]
-            Low-rank matrix estimated by one of the Clorinn algorithms
-            (e.g., FrankWolfe, IALM).
-        """
         if self.method_ == 'svd':
             self._fit_svd(X)
         else:
@@ -161,11 +126,6 @@ class MatrixFactorization():
 
 
     def _fit_svd(self, X):
-        """
-        Truncated SVD factorization.
-
-        Computes the thin SVD of X and retains the top k components.
-        """
         U, s, Vh = np.linalg.svd(X, full_matrices = False)
 
         # Determine the number of factors
@@ -177,26 +137,42 @@ class MatrixFactorization():
         self.U_, self.s_, self.Vh_ = U, s, Vh
         U_k  = U[:, :k]
         s_k  = s[:k]
-        Vh_k = Vh[:k, :]
+        Vh_k = Vh[:k, :].T
         self.L_  = U_k * s_k     # (N, k)
-        self.F_  = Vh_k.T            # (P, k)
+        self.F_  = Vh_k          # (P, k)
         return
 
 
+    def compute_cos(self, X):
+        """
+        Divide by sum of factors for a given trait/variant -- row totals.
+        Gives importance of a factor k for trait n / variant p:
+        which factor contributes most to a trait?
+
+            cos2[n, k] = L[n,k]^2 / sum_k L[n,k]^2
+            cos2[p, k] = F[p,k]^2 / sum_k F[p,k]^2
+
+        """
+        X2 = X ** 2
+        return X2 / np.sum(X2, axis = 1, keepdims = True)
+
+
+    def compute_contribution(self, X):
+        """
+        Divide by sum of traits/variants for a given factor -- column totals.
+        How much a trait n or variant p contributes to a factor k?
+
+            contr[n, k] = L[n,k]^2 / sum_n L[n,k]^2
+            contr[p, k] = F[p,k]^2 / sum_p F[p,k]^2
+
+        """
+        X2 = X ** 2
+        return X2 / np.sum(X2, axis = 0, keepdims = True)
+
+
     def _compute_scores(self):
-        """
-        Compute squared cosine scores and contribution scores
-        from the loadings matrix L.
-        """
-        L2 = np.square(self.L_)
-
-        # Squared cosine scores: importance of factor i for trait j
-        row_totals = np.sum(L2, axis = 1, keepdims = True)
-        row_totals = np.maximum(row_totals, 1e-30)
-        self.cos2_score_ = L2 / row_totals
-
-        # Contribution scores: importance of trait j for factor i
-        col_totals = np.sum(L2, axis = 0, keepdims = True)
-        col_totals = np.maximum(col_totals, 1e-30)
-        self.contribution_score_ = L2 / col_totals
+        self.cos2_traits_    = self.compute_cos(self.L_)
+        self.cos2_variants_  = self.compute_cos(self.F_)
+        self.contr_traits_   = self.compute_contribution(self.L_)
+        self.contr_variants_ = self.compute_contribution(self.F_)
         return
