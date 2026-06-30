@@ -1,17 +1,25 @@
 """
-Main command line options
+An aggressively minimal CLI support. 
+
+It does not try to expose the fitting API, it is only intended
+to be used for a few lightweight things.
+
+    clorinn --version
+    clorinn --test
+    
+These are harmless and useful for sanity checks after installation.
+A working `clorinn --version` is useful because it immediately tells
+that the installed package is importable and the entry point is wired 
+correctly.
+
 """
-import os
 import sys 
 import argparse
-import unittest
 import logging
 
-from .utils.logs import CustomLogger
+from .utils.logs import configure_logging
 from .utils import project
-from .tests.run import run_unittests
 
-mlogger = CustomLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(description=project.description())
@@ -33,28 +41,13 @@ def parse_args():
     parser.add_argument('--verbose',
                         dest = 'verbose',
                         action = 'store_true',
-                        help = 'Print information while running')
+                        help = 'Print information while running tests')
     parser.add_argument('--vverbose',
                         dest = 'vverbose',
                         action = 'store_true',
-                        help = 'Print more information while running')
-    parser.add_argument('--infile',
-                        type = str,
-                        dest = 'infile',
-                        metavar = 'FILE',
-                        help = 'Input file example')
-    parser.add_argument('--seed',
-                        type = int,
-                        dest = 'seed',
-                        metavar = 'INT',
-                        default = None,
-                        help = 'Seed for random initialization')
+                        help = 'Print more information while running tests')
     res = parser.parse_args()
     return parser, res 
-
-
-def do_task():
-    raise NotImplementedError
 
 
 def show_version():
@@ -62,6 +55,7 @@ def show_version():
     print ("{:s} version {:s}".format(project.name(), project.version()))
     print ("")
     return
+
 
 def show_help(parser, opts):
     parser.print_help(sys.stderr)
@@ -71,23 +65,30 @@ def show_help(parser, opts):
 
 def main():
     parser, opts = parse_args()
-    log_level = logging.INFO  if opts.verbose  else None
-    log_level = logging.DEBUG if opts.vverbose else log_level
-    mlogger.set_loglevel(log_level)
-    mlogger.override_global_default_loglevel(log_level)
+    verbosity = 2 if opts.vverbose else 1 if opts.verbose else 0
+    configure_logging(verbosity=verbosity, force=True)
+    mlogger = logging.getLogger(__name__)
+    mlogger.debug("Calling logger from main")
 
     if opts.test or opts.testmodules:
-        mlogger.debug("Calling logger from main")
-        run_unittests(test_class_names = opts.testmodules)
+        from .tests.run import run_unittests
+        # update package logger
+        configure_logging(
+            verbosity=0,
+            formatter="testclass",
+            subsystem_verbosity={
+                "tests": verbosity,
+            },
+            fmt="%(name)-40s | %(levelname)-7s | %(message)s",
+            force=True,
+        )
+        run_unittests(test_class_names=opts.testmodules, verbosity=verbosity)
 
     elif opts.version:
         show_version()
 
     else:
-        if opts.infile:
-            do_task()
-        else:
-            show_help(parser, opts)
+        show_help(parser, opts)
 
 if __name__ == "__main__":
     main()

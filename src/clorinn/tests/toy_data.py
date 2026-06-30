@@ -27,7 +27,7 @@ def get_blockdiag_matrix(n, rholist, rhobg, idx_groups):
     '''
     Generate a block diagonal matrix of size n x n.
     S_ij = 1, if i = j
-         = rholist[q],  if i,j in idx_groups[q]
+         = rholist[q],  if i,j \in idx_groups[q]
          = rhobg, otherwise
     '''
     R = np.ones((n, n)) * rhobg
@@ -93,6 +93,16 @@ def effect_size(n, p, k, Q, h2, g2,
     # observed Z-scores
     Z = Yobs / stderr
     return Z, Yobs, Y, L, F, M, C
+
+
+
+def generate_masked_input(Y, mask):
+    Ymiss_nan = Y.copy()
+    Ymiss_nan[mask] = np.nan
+    Ymiss_nan_cent = Ymiss_nan - np.nanmean(Ymiss_nan, axis = 0, keepdims = True)
+    # Ymiss_nan_cent[mask] = 0.0
+    return Ymiss_nan_cent
+
 
 
 def generate_mask(n, p, ratio, seed = None):

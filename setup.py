@@ -94,6 +94,7 @@ def setup_package(config_file):
         setup_requires   = setup_requires,
         install_requires = install_requires,
         keywords         = cfg_string_tolist(cfg['keywords'], ','),
+        include_package_data = True,
     )
 
     setuptools.setup(**metadata)

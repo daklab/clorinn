@@ -1,6 +1,7 @@
 import os
 import logging
 
+
 def name():
     return "Clorinn"
 
@@ -15,27 +16,12 @@ def version():
     namespace = {}
     with open(vfn, "r", encoding="utf-8") as f:
         exec(compile(f.read(), vfn, "exec"), namespace)
-    #exec(compile(open(vfn).read(), vfn, 'exec'))
-    #res = locals()['__version__']
     return namespace["__version__"]
 
 
 def get_name():
     namestr = __name__
     return namestr.strip().split('.')[0].strip()
-
-
-def logging_level():
-    level = logging.WARN
-    return level
-
-
-def logging_format():
-    return "%(asctime)s | %(name)-40s | %(levelname)-7s | %(message)s"
-
-
-def logging_file():
-    return None
 
 
 def is_non_zero_file(fpath):
